@@ -250,3 +250,62 @@ body:has(#lsh_panel.open) #rightNavHolder {
     font-family: var(--monoFontFamily, monospace);
     font-size: 0.78rem;
 }
+.lsh-ecot-details {
+    margin: 0.4rem 0 1rem;
+    border: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor) 55%, transparent);
+    border-radius: 10px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--SmartThemeBlurTintColor) 82%, transparent);
+}
+
+.lsh-ecot-summary {
+    display: grid;
+    grid-template-columns: auto auto 1fr auto;
+    align-items: center;
+    gap: 0.65rem;
+    min-height: 42px;
+    padding: 0.55rem 0.8rem;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    color: var(--SmartThemeBodyColor);
+    background: color-mix(in srgb, var(--SmartThemeQuoteColor) 12%, transparent);
+}
+
+.lsh-ecot-summary::-webkit-details-marker {
+    display: none;
+}
+
+.lsh-ecot-icon,
+.lsh-ecot-title {
+    color: var(--SmartThemeQuoteColor);
+}
+
+.lsh-ecot-title {
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+
+.lsh-ecot-hint {
+    opacity: 0.68;
+    font-size: 0.86em;
+}
+
+.lsh-ecot-arrow {
+    opacity: 0.72;
+    transition: transform 160ms ease;
+}
+
+.lsh-ecot-details[open] .lsh-ecot-arrow {
+    transform: rotate(180deg);
+}
+
+.lsh-ecot-content {
+    max-height: min(52vh, 620px);
+    padding: 0.85rem 1rem;
+    overflow: auto;
+    border-top: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor) 32%, transparent);
+    color: color-mix(in srgb, var(--SmartThemeBodyColor) 78%, transparent);
+    font-size: 0.9em;
+    line-height: 1.55;
+}

@@ -54,6 +54,43 @@ let lastRuntime = {
 };
 let backgroundUpdateRunning = false;
 let backgroundStartedAt = 0;
+let ecotRenderQueued = false;
+
+function enhanceEcotBlocks(root = document) {
+    const blocks = root.querySelectorAll?.('.mes_text thinking:not([data-lsh-ecot-enhanced])') ?? [];
+    for (const thinking of blocks) {
+        thinking.dataset.lshEcotEnhanced = 'true';
+        const details = document.createElement('details');
+        details.className = 'lsh-ecot-details';
+
+        const summary = document.createElement('summary');
+        summary.className = 'lsh-ecot-summary';
+        summary.innerHTML = '<span class="lsh-ecot-icon fa-solid fa-wand-magic-sparkles"></span><span class="lsh-ecot-title">创作推演</span><span class="lsh-ecot-hint">预设的写作规划，不是正文</span><span class="lsh-ecot-arrow fa-solid fa-chevron-down"></span>';
+
+        const content = document.createElement('div');
+        content.className = 'lsh-ecot-content';
+        while (thinking.firstChild) content.append(thinking.firstChild);
+
+        details.append(summary, content);
+        thinking.replaceWith(details);
+    }
+}
+
+function queueEcotEnhancement() {
+    if (ecotRenderQueued) return;
+    ecotRenderQueued = true;
+    requestAnimationFrame(() => {
+        ecotRenderQueued = false;
+        enhanceEcotBlocks(document);
+    });
+}
+
+function observeEcotRendering() {
+    const chatElement = document.getElementById('chat');
+    if (!chatElement) return;
+    new MutationObserver(queueEcotEnhancement).observe(chatElement, { childList: true, subtree: true });
+    queueEcotEnhancement();
+}
 
 function getSettings() {
     extension_settings[MODULE_NAME] ??= {};
@@ -528,6 +565,7 @@ export async function init() {
     const panelHtml = await renderExtensionTemplateAsync('living-state-harness', 'panel');
     $('body').append(panelHtml);
     bindSettings();
+    observeEcotRendering();
     eventSource.on(event_types.CHAT_CHANGED, async () => {
         await restoreInjection();
         updateUi();
