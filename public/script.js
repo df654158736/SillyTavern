@@ -3989,6 +3989,10 @@ export function createRawPrompt(prompt, api, instructOverride, quietToLoud, syst
  * @prop {boolean} [trimNames] Whether to allow trimming "{{user}}:" and "{{char}}:" from the response.
  * @prop {string} [prefill] An optional prefill for the prompt.
  * @prop {JsonSchema} [jsonSchema] JSON schema to use for the structured generation. Usually requires a special instruction.
+ * @prop {string} [model] Optional model override for this raw request only (chat-completion APIs).
+ * @prop {'enabled'|'disabled'} [thinking] Optional thinking-mode override for this raw request only.
+ * @prop {boolean} [skipChatCompletionSettings] Skip extension settings transforms for an isolated internal request.
+ * @prop {boolean} [ignoreGenerationStop] Keep an isolated background request independent from the main generation stop event.
  */
 
 /**
@@ -3997,13 +4001,14 @@ export function createRawPrompt(prompt, api, instructOverride, quietToLoud, syst
  * @param {GenerateRawParams} params Parameters for generating a message
  * @returns {Promise<object | string>} Raw API response data, or a JSON string extracted from the response when `jsonSchema` is provided.
  */
-export async function generateRawData({ prompt = '', api = null, instructOverride = false, quietToLoud = false, systemPrompt = '', responseLength = null, prefill = '', jsonSchema = null } = {}) {
+export async function generateRawData({ prompt = '', api = null, instructOverride = false, quietToLoud = false, systemPrompt = '', responseLength = null, prefill = '', jsonSchema = null, model = null, thinking = null, skipChatCompletionSettings = false, ignoreGenerationStop = false } = {}) {
     if (!api) {
         api = main_api;
     }
 
     const abortController = new AbortController();
     const responseLengthCustomized = typeof responseLength === 'number' && responseLength > 0;
+    const usesTemporaryResponseLength = responseLengthCustomized && api !== 'openai';
     let eventHook = () => { };
 
     // construct final prompt from the input. Can either be a string or an array of chat-style messages.
@@ -4015,10 +4020,12 @@ export async function generateRawData({ prompt = '', api = null, instructOverrid
         abortController.abort(new Error('Cancelled by stop event'));
         eventAbortController.abort(new Error('Cancelled by extension'));
     };
-    eventSource.on(event_types.GENERATION_STOPPED, abortHook);
+    if (!ignoreGenerationStop) {
+        eventSource.on(event_types.GENERATION_STOPPED, abortHook);
+    }
 
     try {
-        if (responseLengthCustomized) {
+        if (usesTemporaryResponseLength) {
             TempResponseLength.save(api, responseLength);
         }
         /** @type {object|any[]} */
@@ -4065,7 +4072,6 @@ export async function generateRawData({ prompt = '', api = null, instructOverrid
                 break;
             case 'openai': {
                 generateData = prompt;  // generateData is just the chat message object
-                eventHook = TempResponseLength.setupEventHook(api);
             } break;
         }
 
@@ -4074,7 +4080,7 @@ export async function generateRawData({ prompt = '', api = null, instructOverrid
         if (api === 'koboldhorde') {
             data = await generateHorde(prompt.toString(), generateData, abortController.signal, false);
         } else if (api === 'openai') {
-            data = await sendOpenAIRequest('quiet', generateData, abortController.signal, { jsonSchema });
+            data = await sendOpenAIRequest('quiet', generateData, abortController.signal, { jsonSchema, model, thinking, maxTokens: responseLengthCustomized ? responseLength : null, skipChatCompletionSettings });
         } else {
             const generateUrl = getGenerateUrl(api);
             const response = await fetch(generateUrl, {
@@ -4106,7 +4112,7 @@ export async function generateRawData({ prompt = '', api = null, instructOverrid
         return data;
     } finally {
         eventSource.removeListener(event_types.GENERATION_STOPPED, abortHook);
-        if (responseLengthCustomized && TempResponseLength.isCustomized()) {
+        if (usesTemporaryResponseLength && TempResponseLength.isCustomized()) {
             TempResponseLength.restore(api);
             TempResponseLength.removeEventHook(api, eventHook);
         }
@@ -4119,13 +4125,13 @@ export async function generateRawData({ prompt = '', api = null, instructOverrid
  * @param {GenerateRawParams} params Parameters for generating a message
  * @returns {Promise<string>} Generated output: a cleaned-up message string when `jsonSchema` is not provided, or an extracted JSON string conforming to `jsonSchema` when it is.
  */
-export async function generateRaw({ prompt = '', api = null, instructOverride = false, quietToLoud = false, systemPrompt = '', responseLength = null, trimNames = true, prefill = '', jsonSchema = null } = {}) {
+export async function generateRaw({ prompt = '', api = null, instructOverride = false, quietToLoud = false, systemPrompt = '', responseLength = null, trimNames = true, prefill = '', jsonSchema = null, model = null, thinking = null, skipChatCompletionSettings = false, ignoreGenerationStop = false } = {}) {
     if (arguments.length > 0 && typeof arguments[0] !== 'object') {
         console.trace('generateRaw called with positional arguments. Please use an object instead.');
         [prompt, api, instructOverride, quietToLoud, systemPrompt, responseLength, trimNames, prefill, jsonSchema] = arguments;
     }
 
-    const data = await generateRawData({ prompt, api, instructOverride, quietToLoud, systemPrompt, responseLength, prefill, jsonSchema });
+    const data = await generateRawData({ prompt, api, instructOverride, quietToLoud, systemPrompt, responseLength, prefill, jsonSchema, model, thinking, skipChatCompletionSettings, ignoreGenerationStop });
 
     // JSON string (matching the provided schema) will already be extracted.
     if (jsonSchema) {

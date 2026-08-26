@@ -2287,6 +2287,12 @@ router.post('/generate', async function (request, response) {
                 top_logprobs: undefined,
             };
 
+            // Allow isolated internal requests to control thinking without changing
+            // the user's global provider configuration.
+            if (['enabled', 'disabled'].includes(request.body.thinking?.type)) {
+                bodyParams.thinking = { type: request.body.thinking.type };
+            }
+
             // Adjust logprobs params for Chat Completions API, which expects { top_logprobs: number; logprobs: boolean; }
             if (!isTextCompletion && bodyParams.logprobs > 0) {
                 bodyParams.top_logprobs = bodyParams.logprobs;
@@ -2399,6 +2405,12 @@ router.post('/generate', async function (request, response) {
                 logprobs: request.body.logprobs,
                 top_logprobs: undefined,
             };
+
+            // Allow isolated internal requests to control thinking without changing
+            // the user's global custom-provider body configuration.
+            if (['enabled', 'disabled'].includes(request.body.thinking?.type)) {
+                bodyParams.thinking = { type: request.body.thinking.type };
+            }
 
             // Adjust logprobs params for Chat Completions API, which expects { top_logprobs: number; logprobs: boolean; }
             if (!isTextCompletion && bodyParams.logprobs > 0) {

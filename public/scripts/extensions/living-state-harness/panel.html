@@ -1,0 +1,51 @@
+<aside id="lsh_panel" class="lsh-panel" aria-hidden="true">
+    <header class="lsh-panel-header">
+        <div>
+            <div class="lsh-eyebrow">角色动态状态</div>
+            <h3 id="lsh_character_name">未选择角色</h3>
+            <div id="lsh_panel_status" class="lsh-status-label">已关闭</div>
+        </div>
+        <button id="lsh_close_panel" class="menu_button lsh-icon-button" title="关闭">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    </header>
+    <div class="lsh-panel-scroll">
+        <section class="lsh-hero-card">
+            <div class="lsh-section-title">此刻状态</div>
+            <div id="lsh_now_grid" class="lsh-state-grid"></div>
+        </section>
+        <section class="lsh-card">
+            <div class="lsh-section-title">自主性与行动</div>
+            <div id="lsh_agency_grid" class="lsh-state-grid"></div>
+        </section>
+        <section class="lsh-card">
+            <div class="lsh-section-title">关系动态</div>
+            <div id="lsh_relationship_grid" class="lsh-state-grid"></div>
+        </section>
+        <section class="lsh-card">
+            <div class="lsh-section-title">场景之外的生活</div>
+            <div id="lsh_offscreen_lists" class="lsh-list-stack"></div>
+        </section>
+        <section class="lsh-card">
+            <div class="lsh-section-title">剧情连续性</div>
+            <div id="lsh_continuity_lists" class="lsh-list-stack"></div>
+        </section>
+        <details class="lsh-debug-card">
+            <summary>更新详情</summary>
+            <div id="lsh_metrics" class="lsh-metrics"></div>
+            <pre id="lsh_delta_preview" class="lsh-code"></pre>
+        </details>
+        <details class="lsh-debug-card">
+            <summary>编辑原始状态</summary>
+            <textarea id="lsh_raw_state" class="text_pole lsh-raw-editor" rows="18"></textarea>
+            <div class="flex-container">
+                <button id="lsh_save_state" class="menu_button">保存状态</button>
+                <button id="lsh_reset_state" class="menu_button redWarningBG">重置状态</button>
+            </div>
+        </details>
+    </div>
+</aside>
+<button id="lsh_panel_toggle" class="lsh-panel-toggle menu_button" title="打开角色动态状态">
+    <i class="fa-solid fa-heart-pulse"></i>
+    <span id="lsh_toggle_text">角色状态</span>
+</button>

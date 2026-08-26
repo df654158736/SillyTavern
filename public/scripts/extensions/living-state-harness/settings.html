@@ -1,0 +1,50 @@
+<div id="living_state_harness_settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <div class="flex-container alignitemscenter margin0">
+                <b>角色动态状态 Harness</b>
+                <span id="lsh_settings_status" class="lsh-status-label">已关闭</span>
+            </div>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <label class="checkbox_label" for="lsh_enabled">
+                <input id="lsh_enabled" type="checkbox">
+                <span>在单角色聊天中启用</span>
+            </label>
+            <label class="checkbox_label" for="lsh_frozen">
+                <input id="lsh_frozen" type="checkbox">
+                <span>暂停自动更新状态</span>
+            </label>
+            <label for="lsh_depth">提示词注入深度</label>
+            <select id="lsh_depth" class="text_pole">
+                <option value="1">1 — 最近</option>
+                <option value="2">2 — 均衡</option>
+                <option value="4">4 — 较远</option>
+            </select>
+            <label for="lsh_updater_model">状态更新模型（不改变正文模型）</label>
+            <select id="lsh_updater_model" class="text_pole">
+                <option value="deepseek-v4-flash">deepseek-v4-flash — 推荐</option>
+                <option value="deepseek-v4-pro">deepseek-v4-pro — 推理较慢</option>
+                <option value="">使用当前正文模型</option>
+            </select>
+            <label for="lsh_response_tokens">更新器最大输出 Token</label>
+            <input id="lsh_response_tokens" class="text_pole" type="number" min="8192" max="16384" step="1024">
+            <label for="lsh_message_window">每次最多分析的新消息数</label>
+            <input id="lsh_message_window" class="text_pole" type="number" min="2" max="50" step="1">
+            <label for="lsh_author_locks">作者约束（每行一条）</label>
+            <textarea id="lsh_author_locks" class="text_pole textarea_compact" rows="4"></textarea>
+            <div class="flex-container">
+                <button id="lsh_open_panel" class="menu_button menu_button_icon">
+                    <i class="fa-solid fa-heart-pulse"></i>
+                    <span>打开状态面板</span>
+                </button>
+                <button id="lsh_rebuild" class="menu_button menu_button_icon" title="清除快照，并在下一轮重新建立">
+                    <i class="fa-solid fa-rotate"></i>
+                    <span>下一轮重新建立</span>
+                </button>
+            </div>
+            <small class="lsh-muted">质量优先预览版。更新器会过滤摘要、思维链、状态栏和 seeds 等生成内容。</small>
+        </div>
+    </div>
+</div>

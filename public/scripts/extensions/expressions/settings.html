@@ -30,6 +30,9 @@
                 </select>
             </div>
             <div class="expression_llm_prompt_block m-b-1 m-t-1">
+                <label for="expression_llm_model">情绪分类模型</label>
+                <small>仅用于“有限上下文”分类；不会改变正文模型。</small>
+                <input id="expression_llm_model" type="text" class="text_pole" placeholder="deepseek-v4-flash">
                 <label class="checkbox_label" for="expressions_filter_available" title="When using LLM or WebLLM classifier, only show and use expressions that have sprites assigned to them." data-i18n="[title]When using LLM or WebLLM classifier, only show and use expressions that have sprites assigned to them.">
                     <input id="expressions_filter_available" type="checkbox">
                     <span data-i18n="Filter expressions for available sprites">Filter expressions for available sprites</span>

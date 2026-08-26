@@ -43,6 +43,7 @@ const UPDATE_INTERVAL = 2000;
 const STREAMING_UPDATE_INTERVAL = 10000;
 const DEFAULT_FALLBACK_EXPRESSION = 'joy';
 const DEFAULT_LLM_PROMPT = 'Ignore previous instructions. Classify the emotion of the last message. Output just one word, e.g. "joy" or "anger". Choose only one of the following labels: {{labels}}';
+const DEFAULT_LLM_MODEL = 'deepseek-v4-flash';
 const DEFAULT_EXPRESSIONS = [
     'admiration',
     'amusement',
@@ -1137,9 +1138,21 @@ export async function getExpressionLabel(text, expressionsApi = extension_settin
                 try {
                     inApiCall = true;
                     switch (extension_settings.expressions.promptType) {
-                        case PROMPT_TYPE.raw:
-                            emotionResponse = await generateRaw({ prompt: text, systemPrompt: prompt });
-                            break;
+                        case PROMPT_TYPE.raw: {
+                            // Generated replies may contain ECoT, summaries and branch choices.
+                            // Classify only the visible story body so the small auxiliary model
+                            // does not mistake embedded instructions for a continuation request.
+                            const visibleContent = String(text).match(/<content\b[^>]*>([\s\S]*?)<\/content>/i)?.[1] ?? text;
+                            emotionResponse = await generateRaw({
+                                prompt: String(visibleContent).slice(-6000),
+                                systemPrompt: prompt,
+                                model: String(extension_settings.expressions.llmModel || DEFAULT_LLM_MODEL).trim(),
+                                responseLength: 64,
+                                thinking: 'disabled',
+                                skipChatCompletionSettings: true,
+                                ignoreGenerationStop: true,
+                            });
+                        } break;
                         case PROMPT_TYPE.full:
                             emotionResponse = await generateQuietPrompt({ quietPrompt: prompt });
                             break;
@@ -1195,8 +1208,9 @@ export async function getExpressionLabel(text, expressionsApi = extension_settin
             }
         }
     } catch (error) {
-        toastr.error('Could not classify expression. Check the console or your backend for more information.');
-        console.error(error);
+        // Expression classification is auxiliary. Keep the chat experience intact
+        // when the provider is unavailable or returns an invalid label.
+        console.warn('Could not classify expression. Using the configured fallback.', error);
         return extension_settings.expressions.fallback_expression;
     }
 }
@@ -2235,6 +2249,11 @@ function migrateSettings() {
         saveSettingsDebounced();
     }
 
+    if (extension_settings.expressions.llmModel === undefined) {
+        extension_settings.expressions.llmModel = DEFAULT_LLM_MODEL;
+        saveSettingsDebounced();
+    }
+
     if (extension_settings.expressions.allowMultiple === undefined) {
         extension_settings.expressions.allowMultiple = true;
         saveSettingsDebounced();
@@ -2314,6 +2333,11 @@ export async function init() {
         $('#expression_llm_prompt_restore').on('click', function () {
             $('#expression_llm_prompt').val(DEFAULT_LLM_PROMPT);
             extension_settings.expressions.llmPrompt = DEFAULT_LLM_PROMPT;
+            saveSettingsDebounced();
+        });
+        $('#expression_llm_model').val(extension_settings.expressions.llmModel ?? DEFAULT_LLM_MODEL).on('change', function () {
+            extension_settings.expressions.llmModel = String($(this).val()).trim() || DEFAULT_LLM_MODEL;
+            $(this).val(extension_settings.expressions.llmModel);
             saveSettingsDebounced();
         });
         $('#expression_prompt_raw').on('input', function () {

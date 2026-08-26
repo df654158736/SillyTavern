@@ -1,0 +1,15 @@
+{
+    "display_name": "Living State Harness",
+    "loading_order": 95,
+    "requires": [],
+    "optional": [],
+    "generate_interceptor": "livingStateHarnessInterceptor",
+    "js": "index.js",
+    "css": "style.css",
+    "author": "df654158736",
+    "version": "0.1.0",
+    "homePage": "https://github.com/df654158736/SillyTavern",
+    "hooks": {
+        "activate": "init"
+    }
+}

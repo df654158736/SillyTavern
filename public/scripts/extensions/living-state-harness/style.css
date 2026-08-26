@@ -1,0 +1,252 @@
+:root {
+    --lsh-accent: #75e6bd;
+    --lsh-accent-soft: rgb(117 230 189 / 12%);
+    --lsh-panel-bg: #101614;
+    --lsh-card-bg: #1b2421;
+    --lsh-border: #44675b;
+    --lsh-text: #f2f7f5;
+    --lsh-muted-text: #b9c8c3;
+}
+
+#living_state_harness_settings .lsh-status-label {
+    margin-left: 0.75rem;
+}
+
+.lsh-status-label {
+    color: var(--lsh-accent);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.lsh-status-label[data-state="disabled"],
+.lsh-status-label[data-state="empty"] {
+    color: var(--SmartThemeQuoteColor);
+}
+
+.lsh-status-label[data-state="warning"],
+.lsh-status-label[data-state="frozen"] {
+    color: #f0bd68;
+}
+
+.lsh-status-label[data-state="error"] {
+    color: #f07d78;
+}
+
+.lsh-muted {
+    display: block;
+    margin-top: 0.75rem;
+    color: var(--SmartThemeQuoteColor);
+    line-height: 1.4;
+}
+
+.lsh-panel-toggle {
+    position: fixed;
+    z-index: 2998;
+    right: 18px;
+    bottom: 82px;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem 0.8rem;
+    border: 1px solid var(--lsh-border);
+    border-radius: 999px;
+    background: var(--lsh-panel-bg);
+    box-shadow: 0 10px 30px rgb(0 0 0 / 25%);
+    color: var(--lsh-accent);
+    backdrop-filter: blur(14px);
+}
+
+.lsh-panel-toggle[data-state="warning"],
+.lsh-panel-toggle[data-state="frozen"] {
+    color: #f0bd68;
+}
+
+.lsh-panel-toggle[data-state="error"] {
+    color: #f07d78;
+}
+
+.lsh-panel {
+    position: fixed;
+    z-index: 3000;
+    inset: 0 0 0 auto;
+    width: clamp(390px, 31vw, 560px);
+    min-width: 360px;
+    transform: translateX(105%);
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid var(--lsh-border);
+    background:
+        radial-gradient(circle at 85% 5%, var(--lsh-accent-soft), transparent 32%),
+        var(--lsh-panel-bg);
+    box-shadow: -22px 0 55px rgb(0 0 0 / 35%);
+    backdrop-filter: blur(20px);
+    transition: transform 180ms ease-out;
+    color: var(--lsh-text);
+}
+
+.lsh-panel.open {
+    transform: translateX(0);
+}
+
+body:has(#lsh_panel.open) #rightNavHolder {
+    visibility: hidden;
+}
+
+.lsh-panel-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 1.4rem 1.5rem 1rem;
+    border-bottom: 1px solid var(--lsh-border);
+}
+
+.lsh-panel-header h3 {
+    margin: 0.15rem 0 0.25rem;
+    font-size: 1.45rem;
+    line-height: 1.2;
+}
+
+.lsh-eyebrow {
+    color: var(--lsh-accent);
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+}
+
+.lsh-icon-button {
+    width: 2.2rem;
+    min-width: 2.2rem;
+    height: 2.2rem;
+    margin: 0;
+    border-radius: 50%;
+}
+
+.lsh-panel-scroll {
+    overflow: auto;
+    padding: 1rem 1.2rem 2rem;
+}
+
+.lsh-card,
+.lsh-hero-card,
+.lsh-debug-card {
+    margin-bottom: 0.9rem;
+    padding: 1rem;
+    border: 1px solid var(--lsh-border);
+    border-radius: 14px;
+    background: var(--lsh-card-bg);
+}
+
+.lsh-hero-card {
+    background: linear-gradient(145deg, var(--lsh-accent-soft), var(--lsh-card-bg) 52%);
+}
+
+.lsh-section-title {
+    margin-bottom: 0.75rem;
+    color: var(--lsh-accent);
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.lsh-state-grid {
+    display: grid;
+    gap: 0.7rem;
+}
+
+.lsh-state-row {
+    display: grid;
+    grid-template-columns: minmax(88px, 0.32fr) 1fr;
+    gap: 0.85rem;
+    align-items: start;
+}
+
+.lsh-state-key,
+.lsh-list-label {
+    color: var(--lsh-muted-text);
+    font-size: 0.78rem;
+    font-weight: 650;
+}
+
+.lsh-state-value {
+    color: var(--lsh-text);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.lsh-list-group + .lsh-list-group {
+    margin-top: 0.85rem;
+}
+
+.lsh-list-group ul {
+    margin: 0.35rem 0 0;
+    padding-left: 1.2rem;
+}
+
+.lsh-list-group li {
+    margin: 0.28rem 0;
+    line-height: 1.45;
+}
+
+.lsh-empty {
+    color: var(--lsh-muted-text);
+    font-style: italic;
+}
+
+.lsh-debug-card summary {
+    cursor: pointer;
+    color: var(--lsh-text);
+    font-weight: 650;
+}
+
+.lsh-debug-card[open] summary {
+    margin-bottom: 0.8rem;
+}
+
+.lsh-metrics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem;
+    margin-bottom: 0.8rem;
+}
+
+.lsh-metric {
+    padding: 0.55rem 0.65rem;
+    border-radius: 9px;
+    background: rgb(255 255 255 / 4%);
+}
+
+.lsh-metric span,
+.lsh-metric strong {
+    display: block;
+}
+
+.lsh-metric span {
+    color: var(--lsh-muted-text);
+    font-size: 0.72rem;
+}
+
+.lsh-metric strong {
+    margin-top: 0.2rem;
+    font-size: 0.86rem;
+}
+
+.lsh-code {
+    max-height: 280px;
+    overflow: auto;
+    padding: 0.75rem;
+    border-radius: 9px;
+    background: rgb(0 0 0 / 24%);
+    font-size: 0.74rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.lsh-raw-editor {
+    min-height: 320px;
+    margin-bottom: 0.7rem;
+    resize: vertical;
+    font-family: var(--monoFontFamily, monospace);
+    font-size: 0.78rem;
+}
