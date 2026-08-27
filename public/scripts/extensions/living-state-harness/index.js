@@ -9,6 +9,7 @@ import {
     saveSettingsDebounced,
     setExtensionPrompt,
     this_chid,
+    updateMessageBlock,
 } from '../../../script.js';
 import { extension_settings, getContext, renderExtensionTemplateAsync } from '../../extensions.js';
 import { getTokenCountAsync } from '../../tokenizers.js';
@@ -16,15 +17,23 @@ import { removeReasoningFromString } from '../../reasoning.js';
 import { selected_group } from '../../group-chats.js';
 import { Popup } from '../../popup.js';
 import {
+    OUTPUT_VALIDATION_KEY,
     PROMPT_KEY,
+    RESPONSE_PROMPT_KEY,
+    REASONING_RECOVERY_KEY,
     SNAPSHOT_KEY,
+    applyStoryResponseContract,
+    assertDeltaSubject,
     collectMessages,
     createEmptyState,
     findLatestSnapshot,
+    formatResponseContract,
     formatStateForPrompt,
     invalidateSnapshots,
     mergeDelta,
     normalizeState,
+    recoverStoryContentFromReasoning,
+    validateStoryResponse,
 } from './state.js';
 
 const MODULE_NAME = 'livingStateHarness';
@@ -35,6 +44,11 @@ const DEFAULT_SETTINGS = Object.freeze({
     updaterModel: 'deepseek-v4-flash',
     responseTokens: 8192,
     messageWindow: 20,
+    responseContractEnabled: true,
+    outputValidationEnabled: true,
+    recoverStoryFromReasoning: true,
+    minimumBodyCharacters: 1500,
+    maximumBodyCharacters: 2000,
     authorLocks: [
         '不得替用户决定思想、台词或关键行动',
         '角色不能使用尚未在剧情中获知的秘密',
@@ -50,6 +64,7 @@ let lastRuntime = {
     updaterOutputTokens: null,
     injectionTokens: null,
     delta: null,
+    outputValidation: null,
     updatedAt: null,
 };
 let backgroundUpdateRunning = false;
@@ -100,6 +115,21 @@ function getSettings() {
     return extension_settings[MODULE_NAME];
 }
 
+function enforceStoryOutputContract(generateData) {
+    const settings = getSettings();
+    const storyTypes = new Set(['normal', 'regenerate', 'swipe', 'continue', 'append']);
+    if (!settings.enabled || !storyTypes.has(generateData?.type)) return;
+    applyStoryResponseContract(generateData, settings);
+}
+
+function getSubjectIdentity(context = getContext()) {
+    return {
+        role: 'character',
+        name: String(characters[this_chid]?.name ?? context.name2 ?? '').trim(),
+        counterpartName: String(context.name1 ?? 'user').trim() || 'user',
+    };
+}
+
 async function interceptor() {
     const settings = getSettings();
     if (!settings.enabled || selected_group) {
@@ -115,7 +145,8 @@ async function interceptor() {
         return;
     }
 
-    await injectState(findLatestSnapshot(chat)?.state);
+    const subject = getSubjectIdentity(context);
+    await injectPrompts(findLatestSnapshot(chat, Number.POSITIVE_INFINITY, subject)?.state);
     updateUi();
 }
 
@@ -125,14 +156,15 @@ async function updateStateInBackground(messageId, type) {
 
     const context = getContext();
     const chat = context.chat;
+    const subject = getSubjectIdentity(context);
     const targetMessageId = Number(messageId);
     const targetMessage = chat?.[targetMessageId];
     if (!Array.isArray(chat) || !targetMessage || targetMessage.is_user || !characters[this_chid]) return;
 
-    const latest = findLatestSnapshot(chat);
+    const latest = findLatestSnapshot(chat, Number.POSITIVE_INFINITY, subject);
     if (latest?.state?.processedThroughMessageId >= targetMessageId) return;
 
-    const previousState = latest?.state ?? createEmptyState();
+    const previousState = latest?.state ?? createEmptyState(subject);
     const afterMessageId = latest?.state?.processedThroughMessageId ?? -1;
     const messages = collectMessages(chat, afterMessageId, targetMessageId, settings.messageWindow);
     if (messages.length === 0) return;
@@ -144,27 +176,31 @@ async function updateStateInBackground(messageId, type) {
     const startedAt = performance.now();
 
     try {
-        const prompt = buildUpdaterPrompt(previousState, messages, settings.authorLocks);
+        const prompt = buildUpdaterPrompt(previousState, messages, settings.authorLocks, subject);
         const updaterInputTokens = await safeTokenCount(prompt);
-        const delta = await runUpdaterWithRetry(prompt, settings.responseTokens, settings.updaterModel);
+        const delta = await runUpdaterWithRetry(prompt, settings.responseTokens, settings.updaterModel, subject);
         const updaterOutputTokens = await safeTokenCount(JSON.stringify(delta));
-        const { state, changed } = mergeDelta(previousState, delta, messages.map(message => message.id), targetMessageId);
+        const { state, changed } = mergeDelta(previousState, delta, messages.map(message => message.id), targetMessageId, subject);
         saveSnapshot(targetMessage, state, delta, changed);
         await context.saveChat();
-        await injectState(state);
+        await injectPrompts(state);
         lastRuntime = {
             status: changed ? 'updated' : 'unchanged',
             error: '',
             durationMs: Math.round(performance.now() - startedAt),
             updaterInputTokens,
             updaterOutputTokens,
-            injectionTokens: await safeTokenCount(formatStateForPrompt(state)),
+            injectionTokens: await safeTokenCount([
+                formatStateForPrompt(state),
+                settings.responseContractEnabled ? formatResponseContract(settings) : '',
+            ].filter(Boolean).join('\n')),
             delta,
+            outputValidation: lastRuntime.outputValidation,
             updatedAt: new Date().toISOString(),
         };
     } catch (error) {
         console.error('Living State Harness update failed', error);
-        await injectState(previousState);
+        await injectPrompts(previousState);
         lastRuntime = {
             ...lastRuntime,
             status: 'error',
@@ -186,9 +222,9 @@ async function updateStateInBackground(messageId, type) {
  * install a global prompt hook: other extensions can issue concurrent auxiliary
  * requests (for example emotion classification), and a global hook would corrupt them.
  */
-async function runUpdater(prompt, responseLength, model) {
+async function runUpdater(prompt, responseLength, model, subject) {
     const systemPrompt = buildUpdaterSystemPrompt();
-    const jsonPrompt = `${prompt}\n\nReturn one JSON object only. Use this exact shape and use null/[] for unchanged fields:\n${JSON.stringify(createEmptyDelta())}`;
+    const jsonPrompt = `${prompt}\n\nReturn one JSON object only. Use this exact shape and use null/[] for unchanged fields:\n${JSON.stringify(createEmptyDelta(subject))}\n\nEvery item in an *Add array must be an object shaped as {"text":"...","reason":"...","evidenceMessageIds":[0]}; never return a bare string. evidenceMessageIds must cite message ids from newMessages.`;
     return generateRaw({
         prompt: [{ role: 'user', content: jsonPrompt }],
         systemPrompt: `${systemPrompt}\n立即输出 JSON；不要展示分析过程，不要使用 Markdown 代码块，不要在 JSON 外添加文字。`,
@@ -201,11 +237,11 @@ async function runUpdater(prompt, responseLength, model) {
     });
 }
 
-async function runUpdaterWithRetry(prompt, responseLength, model) {
+async function runUpdaterWithRetry(prompt, responseLength, model, subject) {
     let lastError;
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-            return parseDelta(await runUpdater(prompt, responseLength, model));
+            return parseDelta(await runUpdater(prompt, responseLength, model, subject), subject);
         } catch (error) {
             lastError = error;
             console.warn(`Living State Harness updater attempt ${attempt} failed`, error);
@@ -215,18 +251,51 @@ async function runUpdaterWithRetry(prompt, responseLength, model) {
     throw lastError;
 }
 
-async function injectState(state) {
-    if (!state) {
-        clearInjection();
-        return;
-    }
-    const value = formatStateForPrompt(state);
-    setExtensionPrompt(PROMPT_KEY, value, extension_prompt_types.IN_CHAT, getSettings().depth, false, extension_prompt_roles.SYSTEM);
-    lastRuntime.injectionTokens = await safeTokenCount(value);
+async function injectPrompts(state) {
+    const settings = getSettings();
+    const statePrompt = state ? formatStateForPrompt(state) : '';
+    const responsePrompt = settings.responseContractEnabled ? formatResponseContract(settings) : '';
+    setExtensionPrompt(PROMPT_KEY, statePrompt, extension_prompt_types.IN_CHAT, settings.depth, false, extension_prompt_roles.SYSTEM);
+    setExtensionPrompt(RESPONSE_PROMPT_KEY, responsePrompt, extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+    lastRuntime.injectionTokens = await safeTokenCount([statePrompt, responsePrompt].filter(Boolean).join('\n'));
 }
 
 function clearInjection() {
     setExtensionPrompt(PROMPT_KEY, '', extension_prompt_types.IN_CHAT, getSettings().depth, false, extension_prompt_roles.SYSTEM);
+    setExtensionPrompt(RESPONSE_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+}
+
+async function validateReceivedResponse(messageId, type) {
+    const settings = getSettings();
+    if (!settings.enabled || type === 'first_message' || selected_group) return;
+    const context = getContext();
+    const message = context.chat?.[Number(messageId)];
+    if (!message || message.is_user) return;
+
+    let recovered = false;
+    if (settings.recoverStoryFromReasoning) {
+        const recovery = recoverStoryContentFromReasoning(message.mes, message.extra?.reasoning);
+        if (recovery.recovered) {
+            recovered = true;
+            message.mes = recovery.content;
+            message.extra ??= {};
+            message.extra.reasoning = recovery.remainingReasoning;
+            message.extra[REASONING_RECOVERY_KEY] = { recoveredAt: new Date().toISOString() };
+            updateMessageBlock(Number(messageId), message);
+            toastr.info('已将误入思考通道的结构化正文恢复到正文区。', 'Living State Harness');
+        }
+    }
+
+    const validation = validateStoryResponse(message.mes, settings);
+    if (settings.outputValidationEnabled) {
+        message.extra ??= {};
+        message.extra[OUTPUT_VALIDATION_KEY] = { ...validation, checkedAt: new Date().toISOString() };
+        lastRuntime = { ...lastRuntime, outputValidation: validation };
+    }
+    if (recovered || settings.outputValidationEnabled) await context.saveChat();
+    updateUi();
+
+    if (settings.outputValidationEnabled && validation.status === 'fail') toastr.warning(validation.issues.join('；'), '正文结构检查');
 }
 
 function saveSnapshot(message, state, delta, changed) {
@@ -240,7 +309,7 @@ function saveSnapshot(message, state, delta, changed) {
     };
 }
 
-function buildUpdaterPrompt(previousState, messages, authorLocks) {
+function buildUpdaterPrompt(previousState, messages, authorLocks, subject) {
     const fields = getCharacterCardFields();
     const character = characters[this_chid];
     const characterCore = {
@@ -250,7 +319,8 @@ function buildUpdaterPrompt(previousState, messages, authorLocks) {
         scenario: truncate(fields.scenario, 1400),
     };
     return JSON.stringify({
-        task: 'Update the Living State from accepted story evidence only.',
+        task: `Update the Living State for character "${subject.name}" only from accepted story evidence.`,
+        targetSubject: subject,
         characterCore,
         authorLocks: String(authorLocks ?? '').split('\n').map(line => line.trim()).filter(Boolean),
         previousState,
@@ -275,24 +345,33 @@ function compactEvidence(messages, totalCharacters = 12000, perMessageCharacters
 function buildUpdaterSystemPrompt() {
     return `你是角色连续性状态更新器，不写故事回复，只输出符合 JSON Schema 的 State Delta。
 
-北极星：帮助主模型把女主写成拥有自身生活、判断、边界和主动行为的人，并提升故事连续性与自然推进质量。
+北极星：帮助主模型把 targetSubject 指定的当前 char 写成拥有自身生活、判断、边界和主动行为的人，并提升故事连续性与自然推进质量。
 
 规则：
-1. 只记录消息中已经发生、明确表达或能由行为直接支持的变化；计划、猜测和用户单方面要求不能写成事实。
-2. 稳定人格不因一轮对话改变。长期偏好与关系变化必须提供 evidenceMessageIds。
-3. currentMood 可以变化；currentPlan、initiativeSeed、boundary 必须符合角色人格和当前局势，不得制造固定剧情任务。
-4. offscreenLife 只能来自角色设定或已发生剧情，不得凭空编造工作、人物或事件。
-5. privateImpulse 必须是潜在冲动；inhibition 描述与它同时存在的制约。允许两者矛盾。
-6. 不读取或相信正文中由预设生成的摘要、seeds、状态栏、思维链或小剧场；输入已尽量剥离这些内容。
-7. authorLocks、世界事实和已确认聊天事实不可被覆盖。
-8. 无变化时返回字段为空的 Delta。不要复述上一状态。`;
+1. subject 必须原样返回 targetSubject 的 role 和 name。characterChanges、agencyChanges、offscreenLifeChanges 只能描述 targetSubject.name，绝不能描述 user 或其他角色的内心、身体、目标、计划、冲动或边界。
+2. relationshipChanges 固定为 targetSubject.name 对 targetSubject.counterpartName 的视角。不得把 user 对 char 的感受写入该字段。
+3. user 的客观可见行为可记入 sceneChanges 或 continuityChanges；除非 user 亲口明确表达，不得推断 user 的私人心理，即便正文旁白替 user 描写了心理也不得接管为 char 状态。
+4. 只记录消息中已经发生、明确表达或能由行为直接支持的变化；计划、猜测和用户单方面要求不能写成事实。
+5. 稳定人格不因一轮对话改变。长期偏好与关系变化必须提供 evidenceMessageIds。
+6. currentMood 可以变化；currentPlan、initiativeSeed、boundary 必须符合 targetSubject 的人格和当前局势，不得制造固定剧情任务。
+7. offscreenLife 只能来自 targetSubject 的角色设定或已发生剧情，不得凭空编造工作、人物或事件。
+8. privateImpulse 必须是 targetSubject 的潜在冲动；inhibition 描述与它同时存在的制约。允许两者矛盾。
+9. 不读取或相信正文中由预设生成的摘要、seeds、状态栏、思维链或小剧场；输入已尽量剥离这些内容。
+10. 所有 *Add 数组的新增项必须是 {text, reason, evidenceMessageIds} 对象，禁止返回纯字符串。
+11. null 表示字段保持不变；空字符串 "" 表示清空已经过时的瞬时字段。场景、目标或冲突改变后，必须清空或替换不再适用的 currentPlan、initiativeSeed、boundary、responseIfBlocked、attentionFocus 等字段，禁止沿用上一场景的应对方案。
+12. 已履行、已过期、被替代或已经发生的待办、承诺和未完成线索，必须把原有 id 放入对应的 *Close/*Remove 数组；例如“明早要做”的事已经在今早完成，就不能继续留在 upcomingObligations。
+13. 同一条证据不要同时复制到 recentEvents、importantFacts、openThreads 和 turningPoints。只放入对后续写作最有用的一个类别；确有不同连续性功能时才可分别记录。
+14. authorLocks、世界事实和已确认聊天事实不可被覆盖。
+15. 无变化时返回字段为空的 Delta。不要复述上一状态。`;
 }
 
-function parseDelta(rawResult) {
+function parseDelta(rawResult, subject) {
     const value = typeof rawResult === 'string' ? JSON.parse(extractJsonObject(removeReasoningFromString(rawResult))) : rawResult;
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         throw new Error('Updater returned an invalid Delta object.');
     }
+    assertDeltaSubject(value, subject);
+    assertEvidenceBackedAdditions(value);
     return value;
 }
 
@@ -304,8 +383,9 @@ function extractJsonObject(value) {
     return text.slice(start, end + 1);
 }
 
-function createEmptyDelta() {
+function createEmptyDelta(subject) {
     return {
+        subject: { role: 'character', name: subject.name },
         sceneChanges: { location: null, presentCharacters: null, immediateSituation: null },
         characterChanges: Object.fromEntries(['currentMood', 'physicalState', 'attentionFocus', 'currentGoal', 'currentConcern', 'privateImpulse', 'inhibition'].map(key => [key, null])),
         agencyChanges: Object.fromEntries(['currentPlan', 'initiativeSeed', 'boundary', 'responseIfBlocked'].map(key => [key, null])),
@@ -315,6 +395,28 @@ function createEmptyDelta() {
         turningPointsAdd: [],
         turningPointIdsRemove: [],
     };
+}
+
+function assertEvidenceBackedAdditions(delta) {
+    const additions = [
+        delta?.relationshipChanges?.evolvedPreferencesAdd,
+        delta?.offscreenLifeChanges?.recentEventsAdd,
+        delta?.offscreenLifeChanges?.upcomingObligationsAdd,
+        delta?.offscreenLifeChanges?.peopleOnMindAdd,
+        delta?.continuityChanges?.importantFactsAdd,
+        delta?.continuityChanges?.openPromisesAdd,
+        delta?.continuityChanges?.openThreadsAdd,
+        delta?.turningPointsAdd,
+    ];
+    for (const items of additions) {
+        if (!Array.isArray(items)) continue;
+        for (const item of items) {
+            const evidenceMessageIds = Array.isArray(item?.evidenceMessageIds) ? item.evidenceMessageIds.map(Number).filter(Number.isInteger) : [];
+            if (!item || typeof item !== 'object' || Array.isArray(item) || typeof item.text !== 'string' || !item.text.trim() || evidenceMessageIds.length === 0) {
+                throw new Error('Updater returned an addition without {text, evidenceMessageIds}.');
+            }
+        }
+    }
 }
 
 async function onHistoryChanged(messageId) {
@@ -342,8 +444,9 @@ async function onMessagesDeleted() {
 async function restoreInjection() {
     const settings = getSettings();
     const context = getContext();
-    const latest = Array.isArray(context.chat) ? findLatestSnapshot(context.chat) : null;
-    if (settings.enabled && !selected_group) await injectState(latest?.state);
+    const subject = getSubjectIdentity(context);
+    const latest = Array.isArray(context.chat) ? findLatestSnapshot(context.chat, Number.POSITIVE_INFINITY, subject) : null;
+    if (settings.enabled && !selected_group) await injectPrompts(latest?.state);
     else clearInjection();
 }
 
@@ -372,12 +475,12 @@ async function saveManualState() {
         return;
     }
     try {
-        const state = normalizeState(JSON.parse(String($('#lsh_raw_state').val())));
+        const state = normalizeState(JSON.parse(String($('#lsh_raw_state').val())), getSubjectIdentity(context));
         state.version += 1;
         state.processedThroughMessageId = context.chat.indexOf(message);
         saveSnapshot(message, state, { source: 'manual' }, true);
         await context.saveChat();
-        await injectState(state);
+        await injectPrompts(state);
         lastRuntime = { ...lastRuntime, status: 'manual', error: '', delta: { source: 'manual' }, updatedAt: new Date().toISOString() };
         updateUi();
         toastr.success('Living State saved.');
@@ -418,6 +521,35 @@ function bindSettings() {
         $(this).val(settings.messageWindow);
         saveSettingsDebounced();
     });
+    $('#lsh_response_contract').prop('checked', settings.responseContractEnabled).on('input', async function () {
+        settings.responseContractEnabled = Boolean($(this).prop('checked'));
+        saveSettingsDebounced();
+        await restoreInjection();
+        updateUi();
+    });
+    $('#lsh_output_validation').prop('checked', settings.outputValidationEnabled).on('input', function () {
+        settings.outputValidationEnabled = Boolean($(this).prop('checked'));
+        saveSettingsDebounced();
+        updateUi();
+    });
+    $('#lsh_recover_reasoning_story').prop('checked', settings.recoverStoryFromReasoning).on('input', function () {
+        settings.recoverStoryFromReasoning = Boolean($(this).prop('checked'));
+        saveSettingsDebounced();
+    });
+    $('#lsh_minimum_body_characters').val(settings.minimumBodyCharacters).on('change', async function () {
+        settings.minimumBodyCharacters = clamp(Number($(this).val()), 200, 12000);
+        if (settings.maximumBodyCharacters < settings.minimumBodyCharacters) settings.maximumBodyCharacters = settings.minimumBodyCharacters;
+        $(this).val(settings.minimumBodyCharacters);
+        $('#lsh_maximum_body_characters').val(settings.maximumBodyCharacters);
+        saveSettingsDebounced();
+        await restoreInjection();
+    });
+    $('#lsh_maximum_body_characters').val(settings.maximumBodyCharacters).on('change', async function () {
+        settings.maximumBodyCharacters = clamp(Number($(this).val()), settings.minimumBodyCharacters, 16000);
+        $(this).val(settings.maximumBodyCharacters);
+        saveSettingsDebounced();
+        await restoreInjection();
+    });
     $('#lsh_author_locks').val(settings.authorLocks).on('input', function () {
         settings.authorLocks = String($(this).val());
         saveSettingsDebounced();
@@ -437,12 +569,20 @@ function togglePanel(open) {
 function updateUi() {
     const settings = getSettings();
     const context = getContext();
-    const latest = Array.isArray(context.chat) ? findLatestSnapshot(context.chat) : null;
-    const state = latest?.state ?? createEmptyState();
-    const characterName = characters[this_chid]?.name ?? '未选择角色';
+    const subject = getSubjectIdentity(context);
+    const latest = Array.isArray(context.chat) ? findLatestSnapshot(context.chat, Number.POSITIVE_INFINITY, subject) : null;
+    const state = latest?.state ?? createEmptyState(subject);
+    const characterName = subject.name || '未选择角色';
+    const counterpartName = subject.counterpartName || '用户';
     const status = getStatusPresentation(settings, latest);
+    const latestAssistant = [...(context.chat ?? [])].reverse().find(message => !message.is_user);
+    const outputValidation = latestAssistant?.extra?.[OUTPUT_VALIDATION_KEY] ?? lastRuntime.outputValidation;
 
     $('#lsh_character_name').text(characterName);
+    $('#lsh_now_title').text(`${characterName} · 此刻状态`);
+    $('#lsh_agency_title').text(`${characterName} · 自主性与行动`);
+    $('#lsh_relationship_title').text(`${characterName} → ${counterpartName} · 关系动态`);
+    $('#lsh_offscreen_title').text(`${characterName} · 场景之外的生活`);
     $('#lsh_settings_status, #lsh_panel_status').text(status.label).attr('data-state', status.state);
     $('#lsh_panel_toggle').attr('data-state', status.state);
     $('#lsh_toggle_text').text(status.shortLabel);
@@ -478,6 +618,7 @@ function updateUi() {
         ['未完成线索', state.continuity.openThreads],
         ['近期转折点', state.recentTurningPoints],
     ]);
+    renderOutputValidation(outputValidation, settings);
     $('#lsh_metrics').empty()
         .append(metric('状态版本', state.version))
         .append(metric('已处理消息', state.processedThroughMessageId))
@@ -487,6 +628,26 @@ function updateUi() {
         .append(metric('耗时', lastRuntime.durationMs ? `${lastRuntime.durationMs} 毫秒` : '—'));
     $('#lsh_delta_preview').text(lastRuntime.error || JSON.stringify(lastRuntime.delta, null, 2) || '暂无更新记录。');
     if (!$('#lsh_raw_state').is(':focus')) $('#lsh_raw_state').val(JSON.stringify(state, null, 2));
+}
+
+function renderOutputValidation(validation, settings) {
+    $('#lsh_output_card').attr('data-state', validation?.status ?? 'idle');
+    if (!settings.outputValidationEnabled) {
+        $('#lsh_output_status').text('已关闭');
+        $('#lsh_output_length').text('未检查');
+        $('#lsh_output_issues').text('可在扩展设置中重新启用。');
+        return;
+    }
+    if (!validation) {
+        $('#lsh_output_status').text('等待下一次回复');
+        $('#lsh_output_length').text(`目标 ${settings.minimumBodyCharacters}–${settings.maximumBodyCharacters} 字`);
+        $('#lsh_output_issues').text('只统计 <content> 内的非空白字符。');
+        return;
+    }
+    const labels = { pass: '通过', warning: '有提示', fail: '未通过' };
+    $('#lsh_output_status').text(labels[validation.status] ?? validation.status);
+    $('#lsh_output_length').text(`正文 ${validation.bodyCharacters} / ${validation.minimumBodyCharacters}–${validation.maximumBodyCharacters} 字`);
+    $('#lsh_output_issues').text(validation.issues?.length ? validation.issues.join('；') : '正文长度、区块顺序和思考泄漏检查均通过。');
 }
 
 function getStatusPresentation(settings, latest) {
@@ -570,11 +731,15 @@ export async function init() {
         await restoreInjection();
         updateUi();
     });
+    eventSource.on(event_types.CHAT_COMPLETION_SETTINGS_READY, enforceStoryOutputContract);
     eventSource.on(event_types.MESSAGE_EDITED, onHistoryChanged);
     eventSource.on(event_types.MESSAGE_DELETED, onMessagesDeleted);
     eventSource.on(event_types.MESSAGE_SWIPED, updateUi);
     eventSource.on(event_types.MESSAGE_RECEIVED, (messageId, type) => {
-        setTimeout(() => void updateStateInBackground(messageId, type), 0);
+        setTimeout(() => void (async () => {
+            await validateReceivedResponse(messageId, type);
+            await updateStateInBackground(messageId, type);
+        })(), 0);
     });
     setInterval(() => {
         if (backgroundUpdateRunning) updateUi();

@@ -11,24 +11,32 @@
     </header>
     <div class="lsh-panel-scroll">
         <section class="lsh-hero-card">
-            <div class="lsh-section-title">此刻状态</div>
+            <div id="lsh_now_title" class="lsh-section-title">角色 · 此刻状态</div>
             <div id="lsh_now_grid" class="lsh-state-grid"></div>
         </section>
         <section class="lsh-card">
-            <div class="lsh-section-title">自主性与行动</div>
+            <div id="lsh_agency_title" class="lsh-section-title">角色 · 自主性与行动</div>
             <div id="lsh_agency_grid" class="lsh-state-grid"></div>
         </section>
         <section class="lsh-card">
-            <div class="lsh-section-title">关系动态</div>
+            <div id="lsh_relationship_title" class="lsh-section-title">角色 → 用户 · 关系动态</div>
             <div id="lsh_relationship_grid" class="lsh-state-grid"></div>
         </section>
         <section class="lsh-card">
-            <div class="lsh-section-title">场景之外的生活</div>
+            <div id="lsh_offscreen_title" class="lsh-section-title">角色 · 场景之外的生活</div>
             <div id="lsh_offscreen_lists" class="lsh-list-stack"></div>
         </section>
         <section class="lsh-card">
             <div class="lsh-section-title">剧情连续性</div>
             <div id="lsh_continuity_lists" class="lsh-list-stack"></div>
+        </section>
+        <section id="lsh_output_card" class="lsh-card lsh-output-card" data-state="idle">
+            <div class="lsh-output-heading">
+                <div class="lsh-section-title">最新回复检查</div>
+                <strong id="lsh_output_status">等待下一次回复</strong>
+            </div>
+            <div id="lsh_output_length" class="lsh-output-length">目标 1500–2000 字</div>
+            <div id="lsh_output_issues" class="lsh-output-issues">只统计 &lt;content&gt; 内的非空白字符。</div>
         </section>
         <details class="lsh-debug-card">
             <summary>更新详情</summary>
