@@ -33,6 +33,33 @@
             <label for="lsh_message_window">每次最多分析的新消息数</label>
             <input id="lsh_message_window" class="text_pole" type="number" min="2" max="50" step="1">
             <hr>
+            <h4>创作导向</h4>
+            <label for="lsh_state_influence">角色状态对正文的影响</label>
+            <select id="lsh_state_influence" class="text_pole">
+                <option value="subtle">轻 — 仅在直接相关时体现</option>
+                <option value="balanced">均衡 — 推荐</option>
+                <option value="strong">强 — 明显影响角色选择</option>
+            </select>
+            <label for="lsh_initiative">角色主动性</label>
+            <select id="lsh_initiative" class="text_pole">
+                <option value="restrained">克制 — 多观察和可逆反应</option>
+                <option value="natural">自然 — 推荐</option>
+                <option value="assertive">积极 — 主动追求目标和边界</option>
+            </select>
+            <label for="lsh_pacing">剧情推进节奏</label>
+            <select id="lsh_pacing" class="text_pole">
+                <option value="patient">留白 — 少引入新发展</option>
+                <option value="responsive">响应式 — 推荐，推进后留出决策空间</option>
+                <option value="forward">向前 — 允许一个清晰的新发展</option>
+            </select>
+            <label for="lsh_user_micro_agency">用户微互动代写</label>
+            <select id="lsh_user_micro_agency" class="text_pole">
+                <option value="minimal">最少 — 不补用户台词或动作</option>
+                <option value="natural">自然 — 推荐，仅补低风险即时反应</option>
+                <option value="expressive">丰富 — 立场已明确时可补短交流</option>
+            </select>
+            <small class="lsh-muted">这些是软导向，不规定正文格式或字数。用户的关键决定、承诺、升级行为与私人心理始终是不可调的硬红线。</small>
+            <hr>
             <label class="checkbox_label" for="lsh_recover_reasoning_story">
                 <input id="lsh_recover_reasoning_story" type="checkbox">
                 <span>正文误入 reasoning 时自动恢复（仅限完整 &lt;content&gt;）</span>
@@ -49,7 +76,7 @@
                     <span>下一轮重新建立</span>
                 </button>
             </div>
-            <small class="lsh-muted">仅追踪当前 char 的内在状态、自主性与剧情连续性；不注入正文结构、字数或节奏规则，也不修改原生 thinking/reasoning 设置。若完整正文误入 reasoning，只恢复正文并保留其余思考。</small>
+            <small class="lsh-muted">仅追踪当前 char 的内在状态、自主性与剧情连续性；不注入正文格式或字数硬约束，创作档位只作为软导向，也不修改原生 thinking/reasoning 设置。若完整正文误入 reasoning，只恢复正文并保留其余思考。</small>
         </div>
     </div>
 </div>

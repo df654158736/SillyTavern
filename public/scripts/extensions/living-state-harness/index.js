@@ -20,6 +20,7 @@ import { Popup } from '../../popup.js';
 import {
     PROMPT_KEY,
     REASONING_RECOVERY_KEY,
+    SIGNAL_DEFINITIONS,
     SNAPSHOT_KEY,
     assertDeltaSubject,
     collectMessages,
@@ -28,6 +29,7 @@ import {
     formatStateForPrompt,
     invalidateSnapshots,
     mergeDelta,
+    normalizeGuidance,
     normalizeState,
     recoverStoryContentFromReasoning,
     saveStateSnapshot,
@@ -43,8 +45,12 @@ const DEFAULT_SETTINGS = Object.freeze({
     responseTokens: 8192,
     messageWindow: 20,
     recoverStoryFromReasoning: true,
+    stateInfluence: 'balanced',
+    initiative: 'natural',
+    pacing: 'responsive',
+    userMicroAgency: 'natural',
     authorLocks: [
-        '不得替用户决定思想、台词或关键行动',
+        '不得替用户决定私人思想、新承诺、关键台词或关键行动；仅可补充上下文已明确暗示的低风险即时反应',
         '角色不能使用尚未在剧情中获知的秘密',
         '世界客观规律和已发生的聊天事实优先于 Living State',
     ].join('\n'),
@@ -107,6 +113,7 @@ function getSettings() {
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
         extension_settings[MODULE_NAME][key] ??= value;
     }
+    Object.assign(extension_settings[MODULE_NAME], normalizeGuidance(extension_settings[MODULE_NAME]));
     return extension_settings[MODULE_NAME];
 }
 
@@ -190,7 +197,7 @@ async function updateStateInBackground(messageId, type) {
             durationMs: Math.round(performance.now() - startedAt),
             updaterInputTokens,
             updaterOutputTokens,
-            injectionTokens: await safeTokenCount(formatStateForPrompt(state)),
+            injectionTokens: await safeTokenCount(formatStateForPrompt(state, null, settings)),
             delta,
             updatedAt: new Date().toISOString(),
         };
@@ -252,7 +259,7 @@ async function runUpdaterWithRetry(prompt, responseLength, model, subject) {
 
 async function injectPrompts(state) {
     const settings = getSettings();
-    const statePrompt = state ? formatStateForPrompt(state) : '';
+    const statePrompt = state ? formatStateForPrompt(state, null, settings) : '';
     setExtensionPrompt(PROMPT_KEY, statePrompt, extension_prompt_types.IN_CHAT, settings.depth, false, extension_prompt_roles.SYSTEM);
     setExtensionPrompt(LEGACY_RESPONSE_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
     lastRuntime.injectionTokens = await safeTokenCount(statePrompt);
@@ -350,7 +357,10 @@ function buildUpdaterSystemPrompt() {
 12. 已履行、已过期、被替代或已经发生的待办、承诺和未完成线索，必须把原有 id 放入对应的 *Close/*Remove 数组；例如“明早要做”的事已经在今早完成，就不能继续留在 upcomingObligations。
 13. 同一条证据不要同时复制到 recentEvents、importantFacts、openThreads 和 turningPoints。只放入对后续写作最有用的一个类别；确有不同连续性功能时才可分别记录。
 14. authorLocks、世界事实和已确认聊天事实不可被覆盖。
-15. 无变化时返回字段为空的 Delta。不要复述上一状态。`;
+15. signalChanges 是 0–10 的可解释行为信号：trust、closeness 是 targetSubject 对 user 的长期关系信号；tension、initiativeReadiness、boundaryPressure 是此刻动态信号。它们描述状态，不是需要最大化的目标。
+16. 只有新消息提供直接证据时才更新某个信号，并返回 {value, confidence, reason, evidenceMessageIds}。value 必须是 0–10 整数；confidence 只能是 low/medium/high；reason 用一句话解释证据。无新证据必须返回 null。
+17. trust、closeness 应缓慢变化；一次普通互动不应大幅升降。tension、initiativeReadiness、boundaryPressure 可以随眼前局势较快变化，但不得仅凭文风或模型生成的 user 私人心理评分。
+18. 无变化时返回字段为空的 Delta。不要复述上一状态。`;
 }
 
 function parseDelta(rawResult, subject) {
@@ -360,6 +370,7 @@ function parseDelta(rawResult, subject) {
     }
     assertDeltaSubject(value, subject);
     assertEvidenceBackedAdditions(value);
+    assertEvidenceBackedSignals(value);
     return value;
 }
 
@@ -378,11 +389,26 @@ function createEmptyDelta(subject) {
         characterChanges: Object.fromEntries(['currentMood', 'physicalState', 'attentionFocus', 'currentGoal', 'currentConcern', 'privateImpulse', 'inhibition'].map(key => [key, null])),
         agencyChanges: Object.fromEntries(['currentPlan', 'initiativeSeed', 'boundary', 'responseIfBlocked'].map(key => [key, null])),
         relationshipChanges: { trust: null, emotionalCloseness: null, authorityDynamic: null, currentTension: null, evolvedPreferencesAdd: [], evolvedPreferenceIdsRemove: [] },
+        signalChanges: Object.fromEntries(Object.keys(SIGNAL_DEFINITIONS).map(key => [key, null])),
         offscreenLifeChanges: { recentEventsAdd: [], recentEventIdsRemove: [], upcomingObligationsAdd: [], upcomingObligationIdsClose: [], peopleOnMindAdd: [], peopleOnMindIdsRemove: [] },
         continuityChanges: { importantFactsAdd: [], importantFactIdsRemove: [], openPromisesAdd: [], openPromiseIdsClose: [], openThreadsAdd: [], openThreadIdsClose: [] },
         turningPointsAdd: [],
         turningPointIdsRemove: [],
     };
+}
+
+function assertEvidenceBackedSignals(delta) {
+    for (const key of Object.keys(SIGNAL_DEFINITIONS)) {
+        const signal = delta?.signalChanges?.[key];
+        if (signal === null || signal === undefined) continue;
+        const value = Number(signal?.value);
+        const evidenceMessageIds = Array.isArray(signal?.evidenceMessageIds) ? signal.evidenceMessageIds.map(Number).filter(Number.isInteger) : [];
+        if (!signal || typeof signal !== 'object' || !Number.isInteger(value) || value < 0 || value > 10
+            || !['low', 'medium', 'high'].includes(signal.confidence) || typeof signal.reason !== 'string' || !signal.reason.trim()
+            || evidenceMessageIds.length === 0) {
+            throw new Error(`Updater returned an invalid evidence-backed signal: ${key}.`);
+        }
+    }
 }
 
 function assertEvidenceBackedAdditions(delta) {
@@ -575,6 +601,21 @@ function bindSettings() {
         $(this).val(settings.messageWindow);
         saveSettingsDebounced();
     });
+    for (const [selector, key] of [
+        ['#lsh_state_influence', 'stateInfluence'],
+        ['#lsh_initiative', 'initiative'],
+        ['#lsh_pacing', 'pacing'],
+        ['#lsh_user_micro_agency', 'userMicroAgency'],
+    ]) {
+        $(selector).val(settings[key]).on('change', async function () {
+            const normalized = normalizeGuidance({ ...settings, [key]: String($(this).val()) });
+            settings[key] = normalized[key];
+            $(this).val(settings[key]);
+            saveSettingsDebounced();
+            await restoreInjection();
+            updateUi();
+        });
+    }
     $('#lsh_recover_reasoning_story').prop('checked', settings.recoverStoryFromReasoning).on('input', function () {
         settings.recoverStoryFromReasoning = Boolean($(this).prop('checked'));
         saveSettingsDebounced();
@@ -634,6 +675,8 @@ function updateUi() {
         ['权力关系', state.relationship.authorityDynamic],
         ['当前张力', state.relationship.currentTension],
     ]);
+    renderSignals('#lsh_signal_grid', state.signals);
+    renderGuidance('#lsh_guidance_grid', settings);
     renderLists('#lsh_offscreen_lists', [
         ['近期事件', state.offscreenLife.recentEvents],
         ['待办与责任', state.offscreenLife.upcomingObligations],
@@ -694,6 +737,44 @@ function renderLists(selector, groups) {
         root.append(group.append(list));
     }
     if (!count) root.append($('<div class="lsh-empty"></div>').text('当前没有活跃项目。'));
+}
+
+function renderSignals(selector, signals) {
+    const root = $(selector).empty();
+    let populated = 0;
+    const confidenceLabels = { low: '低置信', medium: '中置信', high: '高置信' };
+    for (const [key, definition] of Object.entries(SIGNAL_DEFINITIONS)) {
+        const signal = signals?.[key];
+        if (!Number.isFinite(signal?.value)) continue;
+        populated += 1;
+        const value = Math.min(10, Math.max(0, Math.round(signal.value)));
+        const row = $('<div class="lsh-signal"></div>');
+        const header = $('<div class="lsh-signal-header"></div>')
+            .append($('<span class="lsh-signal-label"></span>').text(definition.label))
+            .append($('<span class="lsh-signal-score"></span>').text(`${value}/10`))
+            .append($('<span class="lsh-signal-confidence"></span>').text(confidenceLabels[signal.confidence] ?? '低置信'));
+        const meter = $('<div class="lsh-signal-meter"></div>')
+            .append($('<span></span>').css('width', `${value * 10}%`));
+        row.append(header, meter);
+        if (signal.reason) row.append($('<div class="lsh-signal-reason"></div>').text(signal.reason));
+        root.append(row);
+    }
+    if (!populated) root.append($('<div class="lsh-empty"></div>').text('暂无可靠评分；不会用默认中间分冒充已知状态。'));
+}
+
+function renderGuidance(selector, input) {
+    const root = $(selector).empty();
+    const guidance = normalizeGuidance(input);
+    const labels = {
+        stateInfluence: { subtle: '状态影响 · 轻', balanced: '状态影响 · 均衡', strong: '状态影响 · 强' },
+        initiative: { restrained: '主动性 · 克制', natural: '主动性 · 自然', assertive: '主动性 · 积极' },
+        pacing: { patient: '节奏 · 留白', responsive: '节奏 · 响应式', forward: '节奏 · 向前' },
+        userMicroAgency: { minimal: '用户微互动 · 最少', natural: '用户微互动 · 自然', expressive: '用户微互动 · 丰富' },
+    };
+    for (const [key, value] of Object.entries(guidance)) {
+        root.append($('<span class="lsh-guidance-chip"></span>').text(labels[key][value]));
+    }
+    root.append($('<div class="lsh-guidance-lock"></div>').text('硬红线：用户的关键决定、承诺、升级行为与私人心理始终由用户决定。'));
 }
 
 function metric(label, value) {

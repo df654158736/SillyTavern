@@ -43,6 +43,13 @@ describe('Living State Harness state ledger', () => {
                 currentTension: '关心和愤怒并存',
                 evolvedPreferencesAdd: [],
             },
+            signalChanges: {
+                trust: { value: 7, confidence: 'high', reason: '仍愿意交流，但隐瞒造成损伤', evidenceMessageIds: [1] },
+                closeness: { value: 6, confidence: 'medium', reason: '关心仍然存在', evidenceMessageIds: [1] },
+                tension: { value: 8, confidence: 'high', reason: '刚结束争执', evidenceMessageIds: [1] },
+                initiativeReadiness: { value: 6, confidence: 'medium', reason: '有主动追问冲动', evidenceMessageIds: [1] },
+                boundaryPressure: { value: 7, confidence: 'high', reason: '隐瞒触及安全边界', evidenceMessageIds: [1] },
+            },
             offscreenLifeChanges: {
                 recentEventsAdd: [],
                 upcomingObligationsAdd: [{ text: '明早需要上课', reason: '既定工作', evidenceMessageIds: [1] }],
@@ -66,7 +73,9 @@ describe('Living State Harness state ledger', () => {
         expect(prompt).toContain('Subject: character "小雅"');
         expect(prompt).toContain('小雅.Plan');
         expect(prompt).toContain('Relationship (小雅 toward D)');
-        expect(prompt).toContain('never to user "D"');
+        expect(prompt).toContain('Trust 7/10');
+        expect(prompt).toContain('Tension 8/10');
+        expect(prompt).toContain('No score or creative setting may override this');
         expect(prompt).not.toContain('Response Contract');
         expect(prompt).not.toContain('剧情推进单元');
         expect(normalizeState(JSON.parse(JSON.stringify(result.state)))).toEqual(result.state);
@@ -81,6 +90,43 @@ describe('Living State Harness state ledger', () => {
         }, [1, 2], 2, subject);
 
         expect(result.state.continuity.importantFacts).toEqual([]);
+    });
+
+    test('accepts only evidence-backed scores and limits sudden score jumps', () => {
+        const previous = createEmptyState(subject);
+        previous.signals.trust = { value: 6, confidence: 'high', reason: '长期互相信任', evidenceMessageIds: [1] };
+        previous.signals.tension = { value: 3, confidence: 'medium', reason: '轻微分歧', evidenceMessageIds: [1] };
+        const result = mergeDelta(previous, {
+            subject: { role: 'character', name: '小雅' },
+            signalChanges: {
+                trust: { value: 0, confidence: 'high', reason: '一次普通争执', evidenceMessageIds: [2] },
+                tension: { value: 10, confidence: 'high', reason: '争执升级', evidenceMessageIds: [2] },
+                closeness: { value: 10, confidence: 'high', reason: '错误证据', evidenceMessageIds: [99] },
+            },
+        }, [2], 2, subject);
+
+        expect(result.state.signals.trust.value).toBe(4);
+        expect(result.state.signals.tension.value).toBe(6);
+        expect(result.state.signals.closeness.value).toBeNull();
+        expect(result.state.signals.trust.evidenceMessageIds).toEqual([2]);
+    });
+
+    test('does not invent neutral scores for legacy state and keeps hard boundaries in assertive mode', () => {
+        const legacy = createEmptyState(subject);
+        delete legacy.signals;
+        const normalized = normalizeState(legacy, subject);
+        const prompt = formatStateForPrompt(normalized, subject, {
+            stateInfluence: 'strong',
+            initiative: 'assertive',
+            pacing: 'forward',
+            userMicroAgency: 'expressive',
+        });
+
+        expect(normalized.signals.trust.value).toBeNull();
+        expect(prompt).not.toContain('Trust 5/10');
+        expect(prompt).toContain('initiative=assertive');
+        expect(prompt).toContain('stop before any new commitment');
+        expect(prompt).toContain('Hard boundary: never decide "D"');
     });
 
     test('removes generated metadata blocks from evidence', () => {

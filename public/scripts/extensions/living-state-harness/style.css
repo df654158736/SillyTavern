@@ -150,6 +150,86 @@ body:has(#lsh_panel.open) #rightNavHolder {
     text-transform: uppercase;
 }
 
+.lsh-card-note {
+    margin: -0.2rem 0 0.8rem;
+    color: var(--lsh-muted-text);
+    font-size: 0.76rem;
+    line-height: 1.45;
+}
+
+.lsh-signal-grid {
+    display: grid;
+    gap: 0.85rem;
+}
+
+.lsh-signal-header {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 0.5rem;
+    align-items: baseline;
+}
+
+.lsh-signal-label {
+    font-weight: 700;
+}
+
+.lsh-signal-score {
+    color: var(--lsh-accent);
+    font-weight: 800;
+}
+
+.lsh-signal-confidence {
+    color: var(--lsh-muted-text);
+    font-size: 0.7rem;
+}
+
+.lsh-signal-meter {
+    height: 6px;
+    margin-top: 0.38rem;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 8%);
+}
+
+.lsh-signal-meter span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--lsh-accent) 55%, transparent), var(--lsh-accent));
+}
+
+.lsh-signal-reason {
+    margin-top: 0.38rem;
+    color: var(--lsh-muted-text);
+    font-size: 0.74rem;
+    line-height: 1.4;
+}
+
+.lsh-guidance-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.48rem;
+}
+
+.lsh-guidance-chip {
+    padding: 0.38rem 0.58rem;
+    border: 1px solid color-mix(in srgb, var(--lsh-border) 78%, transparent);
+    border-radius: 999px;
+    color: var(--lsh-text);
+    background: var(--lsh-accent-soft);
+    font-size: 0.72rem;
+}
+
+.lsh-guidance-lock {
+    flex-basis: 100%;
+    margin-top: 0.2rem;
+    padding-left: 0.65rem;
+    border-left: 2px solid #f0bd68;
+    color: var(--lsh-muted-text);
+    font-size: 0.74rem;
+    line-height: 1.45;
+}
+
 .lsh-state-grid {
     display: grid;
     gap: 0.7rem;

@@ -3,6 +3,16 @@ export const PROMPT_KEY = 'living_state_harness';
 export const REASONING_RECOVERY_KEY = 'living_state_harness_reasoning_recovery';
 export const STATE_SCHEMA_VERSION = 2;
 
+export const SIGNAL_DEFINITIONS = Object.freeze({
+    trust: Object.freeze({ label: '信任', promptLabel: 'Trust', maximumStep: 2 }),
+    closeness: Object.freeze({ label: '亲密', promptLabel: 'Closeness', maximumStep: 2 }),
+    tension: Object.freeze({ label: '紧张', promptLabel: 'Tension', maximumStep: 3 }),
+    initiativeReadiness: Object.freeze({ label: '主动准备', promptLabel: 'Initiative readiness', maximumStep: 3 }),
+    boundaryPressure: Object.freeze({ label: '边界压力', promptLabel: 'Boundary pressure', maximumStep: 3 }),
+});
+
+const CONFIDENCE_LEVELS = new Set(['low', 'medium', 'high']);
+
 const LIST_LIMITS = Object.freeze({
     recentEvents: 5,
     upcomingObligations: 5,
@@ -47,6 +57,7 @@ export function createEmptyState(subject = {}) {
             currentTension: '',
             evolvedPreferences: [],
         },
+        signals: Object.fromEntries(Object.keys(SIGNAL_DEFINITIONS).map(key => [key, createEmptySignal()])),
         offscreenLife: {
             recentEvents: [],
             upcomingObligations: [],
@@ -79,6 +90,7 @@ export function normalizeState(input, subject = null) {
     mergeStringFields(base.agency, input.agency, Object.keys(base.agency));
     mergeStringFields(base.relationship, input.relationship, ['trust', 'emotionalCloseness', 'authorityDynamic', 'currentTension']);
     base.relationship.evolvedPreferences = normalizeItems(input.relationship?.evolvedPreferences, LIST_LIMITS.evolvedPreferences);
+    for (const key of Object.keys(SIGNAL_DEFINITIONS)) base.signals[key] = normalizeSignal(input.signals?.[key]);
     base.offscreenLife.recentEvents = normalizeItems(input.offscreenLife?.recentEvents, LIST_LIMITS.recentEvents);
     base.offscreenLife.upcomingObligations = normalizeItems(input.offscreenLife?.upcomingObligations, LIST_LIMITS.upcomingObligations);
     base.offscreenLife.peopleOnMind = normalizeItems(input.offscreenLife?.peopleOnMind, LIST_LIMITS.peopleOnMind);
@@ -177,6 +189,7 @@ export function mergeDelta(previousState, delta, evidenceIds, throughMessageId, 
     applyStringChanges(state.character, delta?.characterChanges, Object.keys(state.character));
     applyStringChanges(state.agency, delta?.agencyChanges, Object.keys(state.agency));
     applyStringChanges(state.relationship, delta?.relationshipChanges, ['trust', 'emotionalCloseness', 'authorityDynamic', 'currentTension']);
+    applySignalChanges(state.signals, delta?.signalChanges, allowedEvidence);
 
     updateList(state.relationship.evolvedPreferences, delta?.relationshipChanges?.evolvedPreferencesAdd, delta?.relationshipChanges?.evolvedPreferenceIdsRemove, allowedEvidence, 'preference', LIST_LIMITS.evolvedPreferences);
     updateList(state.offscreenLife.recentEvents, delta?.offscreenLifeChanges?.recentEventsAdd, delta?.offscreenLifeChanges?.recentEventIdsRemove, allowedEvidence, 'event', LIST_LIMITS.recentEvents);
@@ -196,7 +209,7 @@ export function mergeDelta(previousState, delta, evidenceIds, throughMessageId, 
     return { state, changed };
 }
 
-export function formatStateForPrompt(input, subject = null) {
+export function formatStateForPrompt(input, subject = null, guidance = {}) {
     const state = normalizeState(input, subject);
     const characterName = state.subject.name || 'the active character';
     const counterpartName = state.subject.counterpartName || 'the user';
@@ -217,6 +230,7 @@ export function formatStateForPrompt(input, subject = null) {
         formatLine(`${characterName}.Impulse / inhibition`, [state.character.privateImpulse, state.character.inhibition].filter(Boolean).join('；')),
         formatLine(`${characterName}.Boundary`, [state.agency.boundary, state.agency.responseIfBlocked].filter(Boolean).join('；')),
         formatLine(`Relationship (${characterName} toward ${counterpartName})`, [state.relationship.trust, state.relationship.emotionalCloseness, state.relationship.authorityDynamic, state.relationship.currentTension].filter(Boolean).join('；')),
+        formatSignalLine(state.signals),
         formatPromptList(`${characterName}.Evolved preferences`, state.relationship.evolvedPreferences, 3, seenListItems),
         formatPromptList(`${characterName}.Recent offscreen events`, state.offscreenLife.recentEvents, 2, seenListItems),
         formatPromptList(`${characterName}.Upcoming obligations`, state.offscreenLife.upcomingObligations, 3, seenListItems),
@@ -225,12 +239,23 @@ export function formatStateForPrompt(input, subject = null) {
         formatPromptList('Open promises', state.continuity.openPromises, 3, seenListItems),
         formatPromptList('Open threads', state.continuity.openThreads, 3, seenListItems),
         formatPromptList('Recent turning points', state.recentTurningPoints, 3, seenListItems),
+        ...formatNarrativeGuidance(guidance, characterName, counterpartName),
         `All Character State, Agency, Offscreen Life, and Relationship perspective fields above belong exclusively to "${characterName}", never to user "${counterpartName}".`,
-        `Do not use this state to decide "${counterpartName}"'s private thoughts, dialogue, plans, feelings, or key actions.`,
+        `Hard boundary: never decide "${counterpartName}"'s private thoughts, new commitments, consequential dialogue, plans, feelings, or key actions. No score or creative setting may override this.`,
+        'The 0–10 signals are descriptive estimates, not objectives to maximize. Use only relevant, evidence-backed signals; textual state and accepted story facts take precedence.',
         `Use this state as latent context. Let "${characterName}" choose naturally; do not force every item into the next reply. Character card, established chat facts, and world rules take precedence.`,
         '[/Current Living State]',
     ];
     return lines.filter(Boolean).join('\n');
+}
+
+export function normalizeGuidance(input = {}) {
+    return {
+        stateInfluence: enumOr(input.stateInfluence, ['subtle', 'balanced', 'strong'], 'balanced'),
+        initiative: enumOr(input.initiative, ['restrained', 'natural', 'assertive'], 'natural'),
+        pacing: enumOr(input.pacing, ['patient', 'responsive', 'forward'], 'responsive'),
+        userMicroAgency: enumOr(input.userMicroAgency, ['minimal', 'natural', 'expressive'], 'natural'),
+    };
 }
 
 export function recoverStoryContentFromReasoning(content, reasoning) {
@@ -297,6 +322,43 @@ function mergeStringFields(target, source, fields) {
     for (const field of fields) target[field] = cleanString(source?.[field]);
 }
 
+function createEmptySignal() {
+    return { value: null, confidence: 'low', reason: '', evidenceMessageIds: [] };
+}
+
+function normalizeSignal(input) {
+    const signal = createEmptySignal();
+    if (!input || typeof input !== 'object') return signal;
+    const numericValue = input.value === null || input.value === '' ? Number.NaN : Number(input.value);
+    signal.value = Number.isFinite(numericValue) ? Math.min(10, Math.max(0, Math.round(numericValue))) : null;
+    signal.confidence = CONFIDENCE_LEVELS.has(input.confidence) ? input.confidence : 'low';
+    signal.reason = cleanString(input.reason).slice(0, 240);
+    signal.evidenceMessageIds = numberArray(input.evidenceMessageIds).slice(-6);
+    return signal;
+}
+
+function applySignalChanges(target, changes, allowedEvidence) {
+    if (!changes || typeof changes !== 'object') return;
+    for (const [key, definition] of Object.entries(SIGNAL_DEFINITIONS)) {
+        const candidate = changes[key];
+        if (!candidate || typeof candidate !== 'object') continue;
+        const evidenceMessageIds = numberArray(candidate.evidenceMessageIds).filter(id => allowedEvidence.has(id)).slice(-6);
+        const value = Number(candidate.value);
+        if (!Number.isFinite(value) || evidenceMessageIds.length === 0) continue;
+        const previous = normalizeSignal(target[key]);
+        const requested = Math.min(10, Math.max(0, Math.round(value)));
+        const nextValue = previous.value === null
+            ? requested
+            : Math.min(previous.value + definition.maximumStep, Math.max(previous.value - definition.maximumStep, requested));
+        target[key] = {
+            value: nextValue,
+            confidence: CONFIDENCE_LEVELS.has(candidate.confidence) ? candidate.confidence : 'low',
+            reason: cleanString(candidate.reason).slice(0, 240),
+            evidenceMessageIds,
+        };
+    }
+}
+
 function applyStringChanges(target, changes, fields) {
     if (!changes || typeof changes !== 'object') return;
     for (const field of fields) {
@@ -351,12 +413,58 @@ function numberOr(value, fallback) {
     return Number.isFinite(number) ? number : fallback;
 }
 
+function enumOr(value, allowed, fallback) {
+    return allowed.includes(value) ? value : fallback;
+}
+
 function cleanString(value) {
     return typeof value === 'string' ? value.trim().slice(0, 1000) : '';
 }
 
 function formatLine(label, value) {
     return value ? `${label}: ${value}` : '';
+}
+
+function formatSignalLine(signals) {
+    const values = Object.entries(SIGNAL_DEFINITIONS)
+        .map(([key, definition]) => {
+            const signal = normalizeSignal(signals?.[key]);
+            if (signal.value === null) return '';
+            return `${definition.promptLabel} ${signal.value}/10 (${[signal.confidence, signal.reason].filter(Boolean).join('；')})`;
+        })
+        .filter(Boolean);
+    return values.length ? `Behavior signals: ${values.join('；')}` : '';
+}
+
+function formatNarrativeGuidance(input, characterName, counterpartName) {
+    const guidance = normalizeGuidance(input);
+    const stateInfluence = {
+        subtle: 'Use Living State quietly and only when directly relevant to the immediate exchange.',
+        balanced: 'Let the most relevant Living State signals shape reactions without displaying or mechanically acting out the state sheet.',
+        strong: 'Let relevant Living State tensions, goals, and boundaries meaningfully shape the character’s choices, without forcing unrelated items into the scene.',
+    }[guidance.stateInfluence];
+    const initiative = {
+        restrained: `${characterName} favors observation and small reversible responses unless the situation clearly demands action.`,
+        natural: `${characterName} may initiate plausible dialogue or low-risk action when motivated by the current state.`,
+        assertive: `${characterName} may actively pursue personal goals, press a boundary, or change the immediate situation while respecting established facts.`,
+    }[guidance.initiative];
+    const pacing = {
+        patient: 'Favor reaction, texture, and unresolved space; avoid introducing a new consequential development unless the user clearly invites it.',
+        responsive: 'Advance only the locally relevant situation and leave room for user intervention after a meaningful change; do not resolve several consequential developments at once.',
+        forward: 'Allow a clear next development driven by existing motives, while stopping before the user’s next consequential choice.',
+    }[guidance.pacing];
+    const userMicroAgency = {
+        minimal: `Do not supply new dialogue or actions for ${counterpartName}; rely on the user’s explicit input.`,
+        natural: `You may supply brief, low-stakes ${counterpartName} reactions already implied by the exchange for conversational flow, but no new decision, commitment, escalation, or private intent.`,
+        expressive: `You may render short natural ${counterpartName} exchanges when their stance is already established, but must stop before any new commitment, escalation, key action, or private intent.`,
+    }[guidance.userMicroAgency];
+    return [
+        `Narrative Guidance: state=${guidance.stateInfluence}; initiative=${guidance.initiative}; pacing=${guidance.pacing}; user micro-agency=${guidance.userMicroAgency}.`,
+        stateInfluence,
+        initiative,
+        pacing,
+        userMicroAgency,
+    ];
 }
 
 function formatPromptList(label, items, limit, seen) {
