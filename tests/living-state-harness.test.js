@@ -1,6 +1,7 @@
 import { describe, expect, test } from '@jest/globals';
 
 import {
+    PROMPT_BUDGET_CHARACTERS,
     SNAPSHOT_KEY,
     collectMessages,
     createEmptyState,
@@ -73,8 +74,10 @@ describe('Living State Harness state ledger', () => {
         expect(prompt).toContain('Subject: character "小雅"');
         expect(prompt).toContain('小雅.Plan');
         expect(prompt).toContain('Relationship (小雅 toward D)');
-        expect(prompt).toContain('Trust 7/10');
-        expect(prompt).toContain('Tension 8/10');
+        expect(prompt).toContain('Trust high');
+        expect(prompt).toContain('Tension high');
+        expect(prompt).not.toContain('/10');
+        expect(prompt).not.toContain('仍愿意交流，但隐瞒造成损伤');
         expect(prompt).toContain('No score or creative setting may override this');
         expect(prompt).not.toContain('Response Contract');
         expect(prompt).not.toContain('剧情推进单元');
@@ -111,6 +114,28 @@ describe('Living State Harness state ledger', () => {
         expect(result.state.signals.trust.evidenceMessageIds).toEqual([2]);
     });
 
+    test('prevents ordinary consecutive turns from ratcheting slow relationship signals upward', () => {
+        const previous = createEmptyState(subject);
+        previous.signals.closeness = { value: 8, confidence: 'high', reason: '此前已有稳定亲近', evidenceMessageIds: [10] };
+
+        const tooSoon = mergeDelta(previous, {
+            subject: { role: 'character', name: '小雅' },
+            signalChanges: {
+                closeness: { value: 9, confidence: 'high', reason: '本轮有普通照顾', evidenceMessageIds: [12] },
+            },
+        }, [12], 12, subject);
+        expect(tooSoon.state.signals.closeness.value).toBe(8);
+        expect(tooSoon.state.signals.closeness.evidenceMessageIds).toEqual([10]);
+
+        const enoughHistory = mergeDelta(tooSoon.state, {
+            subject: { role: 'character', name: '小雅' },
+            signalChanges: {
+                closeness: { value: 10, confidence: 'high', reason: '出现明确且稳定的关系里程碑', evidenceMessageIds: [14] },
+            },
+        }, [14], 14, subject);
+        expect(enoughHistory.state.signals.closeness.value).toBe(9);
+    });
+
     test('does not invent neutral scores for legacy state and keeps hard boundaries in assertive mode', () => {
         const legacy = createEmptyState(subject);
         delete legacy.signals;
@@ -124,7 +149,7 @@ describe('Living State Harness state ledger', () => {
 
         expect(normalized.signals.trust.value).toBeNull();
         expect(prompt).not.toContain('Trust 5/10');
-        expect(prompt).toContain('initiative=assertive');
+        expect(prompt).toContain('may actively pursue personal goals');
         expect(prompt).toContain('stop before any new commitment');
         expect(prompt).toContain('Hard boundary: never decide "D"');
     });
@@ -155,6 +180,31 @@ describe('Living State Harness state ledger', () => {
         const prompt = formatStateForPrompt(state);
 
         expect(prompt.match(/小雅已经检查完D的劝学背诵/g)).toHaveLength(1);
+    });
+
+    test('keeps a bloated legacy snapshot intact while projecting a bounded compact prompt', () => {
+        const state = createEmptyState(subject);
+        const longText = '这是保存在历史快照里的完整状态细节，包含较多背景和上下文。'.repeat(30);
+        state.scene.location = longText;
+        state.scene.immediateSituation = longText;
+        for (const key of Object.keys(state.character)) state.character[key] = longText;
+        for (const key of Object.keys(state.agency)) state.agency[key] = longText;
+        for (const key of ['trust', 'emotionalCloseness', 'authorityDynamic', 'currentTension']) state.relationship[key] = longText;
+        state.signals.trust = { value: 9, confidence: 'high', reason: longText, evidenceMessageIds: [1] };
+        state.continuity.importantFacts = Array.from({ length: 8 }, (_, index) => ({
+            id: `fact-${index}`,
+            text: `${longText}${index}`,
+            evidenceMessageIds: [1],
+        }));
+
+        const prompt = formatStateForPrompt(state);
+
+        expect(prompt.length).toBeLessThanOrEqual(PROMPT_BUDGET_CHARACTERS);
+        expect(prompt).toContain('Hard boundary: never decide "D"');
+        expect(prompt).toContain('[/Current Living State]');
+        expect(prompt).toContain('Trust very high');
+        expect(prompt).not.toContain('9/10');
+        expect(state.scene.location).toBe(longText);
     });
 
     test('finds and invalidates snapshots after a changed message', () => {

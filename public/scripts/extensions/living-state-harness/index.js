@@ -356,11 +356,13 @@ function buildUpdaterSystemPrompt() {
 11. null 表示字段保持不变；空字符串 "" 表示清空已经过时的瞬时字段。场景、目标或冲突改变后，必须清空或替换不再适用的 currentPlan、initiativeSeed、boundary、responseIfBlocked、attentionFocus 等字段，禁止沿用上一场景的应对方案。
 12. 已履行、已过期、被替代或已经发生的待办、承诺和未完成线索，必须把原有 id 放入对应的 *Close/*Remove 数组；例如“明早要做”的事已经在今早完成，就不能继续留在 upcomingObligations。
 13. 同一条证据不要同时复制到 recentEvents、importantFacts、openThreads 和 turningPoints。只放入对后续写作最有用的一个类别；确有不同连续性功能时才可分别记录。
-14. authorLocks、世界事实和已确认聊天事实不可被覆盖。
-15. signalChanges 是 0–10 的可解释行为信号：trust、closeness 是 targetSubject 对 user 的长期关系信号；tension、initiativeReadiness、boundaryPressure 是此刻动态信号。它们描述状态，不是需要最大化的目标。
-16. 只有新消息提供直接证据时才更新某个信号，并返回 {value, confidence, reason, evidenceMessageIds}。value 必须是 0–10 整数；confidence 只能是 low/medium/high；reason 用一句话解释证据。无新证据必须返回 null。
-17. trust、closeness 应缓慢变化；一次普通互动不应大幅升降。tension、initiativeReadiness、boundaryPressure 可以随眼前局势较快变化，但不得仅凭文风或模型生成的 user 私人心理评分。
-18. 无变化时返回字段为空的 Delta。不要复述上一状态。`;
+14. 每个字符串字段只写一个原子状态，不摘抄正文，不写修辞性段落。scene 的每项不超过 120 个中文字符，其他状态字段不超过 80 个中文字符，列表 text/reason 各不超过 80 个中文字符。与其他字段相同的内容不要换句话重复。
+15. 在处理新增项前，逐项检查 previousState 中现有的 obligation/promise/thread id。只要新消息证明它已完成、失效、被替代或已不再待处理，即使本轮还有其他变化，也必须关闭旧 id；已完成事项不得换一种措辞重新加入开放列表。
+16. authorLocks、世界事实和已确认聊天事实不可被覆盖。
+17. signalChanges 是 0–10 的可解释行为信号：trust、closeness 是 targetSubject 对 user 的长期关系信号；tension、initiativeReadiness、boundaryPressure 是此刻动态信号。它们描述状态，不是需要最大化的目标。
+18. 只有新消息提供直接证据时才更新某个信号，并返回 {value, confidence, reason, evidenceMessageIds}。value 必须是 0–10 整数；confidence 只能是 low/medium/high；reason 用一句话解释证据。无新证据必须返回 null。
+19. trust、closeness 应缓慢变化。普通照顾、日常肢体接触、相似语气或重复表现不能再次加分；7 以上需要持续关系证据，9–10 只用于明确、稳定且重大的关系里程碑。tension、initiativeReadiness、boundaryPressure 可以随眼前局势较快变化，但不得仅凭文风或模型生成的 user 私人心理评分。
+20. 无变化时返回字段为空的 Delta。不要复述上一状态。`;
 }
 
 function parseDelta(rawResult, subject) {

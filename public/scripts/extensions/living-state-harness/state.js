@@ -2,10 +2,11 @@ export const SNAPSHOT_KEY = 'living_state_harness';
 export const PROMPT_KEY = 'living_state_harness';
 export const REASONING_RECOVERY_KEY = 'living_state_harness_reasoning_recovery';
 export const STATE_SCHEMA_VERSION = 2;
+export const PROMPT_BUDGET_CHARACTERS = 3200;
 
 export const SIGNAL_DEFINITIONS = Object.freeze({
-    trust: Object.freeze({ label: '信任', promptLabel: 'Trust', maximumStep: 2 }),
-    closeness: Object.freeze({ label: '亲密', promptLabel: 'Closeness', maximumStep: 2 }),
+    trust: Object.freeze({ label: '信任', promptLabel: 'Trust', maximumStep: 2, slowPositive: true }),
+    closeness: Object.freeze({ label: '亲密', promptLabel: 'Closeness', maximumStep: 2, slowPositive: true }),
     tension: Object.freeze({ label: '紧张', promptLabel: 'Tension', maximumStep: 3 }),
     initiativeReadiness: Object.freeze({ label: '主动准备', promptLabel: 'Initiative readiness', maximumStep: 3 }),
     boundaryPressure: Object.freeze({ label: '边界压力', promptLabel: 'Boundary pressure', maximumStep: 3 }),
@@ -213,40 +214,43 @@ export function formatStateForPrompt(input, subject = null, guidance = {}) {
     const state = normalizeState(input, subject);
     const characterName = state.subject.name || 'the active character';
     const counterpartName = state.subject.counterpartName || 'the user';
-    const seenListItems = [];
-    const lines = [
+    const fixedStart = [
         `[Current Living State for character "${characterName}" only — private working context; never quote, explain, or enumerate it in the reply.]`,
         `Subject: character "${characterName}"`,
         `Counterpart: user "${counterpartName}"`,
-        formatLine('Scene', [state.scene.location, state.scene.immediateSituation].filter(Boolean).join('；')),
-        formatLine('Present', state.scene.presentCharacters.join('、')),
-        formatLine(`${characterName}.Mood`, state.character.currentMood),
-        formatLine(`${characterName}.Physical state`, state.character.physicalState),
-        formatLine(`${characterName}.Attention`, state.character.attentionFocus),
-        formatLine(`${characterName}.Current goal`, state.character.currentGoal),
-        formatLine(`${characterName}.Concern`, state.character.currentConcern),
-        formatLine(`${characterName}.Plan`, state.agency.currentPlan),
-        formatLine(`${characterName}.Possible initiative`, state.agency.initiativeSeed),
-        formatLine(`${characterName}.Impulse / inhibition`, [state.character.privateImpulse, state.character.inhibition].filter(Boolean).join('；')),
-        formatLine(`${characterName}.Boundary`, [state.agency.boundary, state.agency.responseIfBlocked].filter(Boolean).join('；')),
-        formatLine(`Relationship (${characterName} toward ${counterpartName})`, [state.relationship.trust, state.relationship.emotionalCloseness, state.relationship.authorityDynamic, state.relationship.currentTension].filter(Boolean).join('；')),
-        formatSignalLine(state.signals),
-        formatPromptList(`${characterName}.Evolved preferences`, state.relationship.evolvedPreferences, 3, seenListItems),
-        formatPromptList(`${characterName}.Recent offscreen events`, state.offscreenLife.recentEvents, 2, seenListItems),
-        formatPromptList(`${characterName}.Upcoming obligations`, state.offscreenLife.upcomingObligations, 3, seenListItems),
-        formatPromptList(`${characterName}.People on mind`, state.offscreenLife.peopleOnMind, 2, seenListItems),
-        formatPromptList('Important continuity facts', state.continuity.importantFacts, 4, seenListItems),
-        formatPromptList('Open promises', state.continuity.openPromises, 3, seenListItems),
-        formatPromptList('Open threads', state.continuity.openThreads, 3, seenListItems),
-        formatPromptList('Recent turning points', state.recentTurningPoints, 3, seenListItems),
+    ];
+    const fixedEnd = [
         ...formatNarrativeGuidance(guidance, characterName, counterpartName),
         `All Character State, Agency, Offscreen Life, and Relationship perspective fields above belong exclusively to "${characterName}", never to user "${counterpartName}".`,
         `Hard boundary: never decide "${counterpartName}"'s private thoughts, new commitments, consequential dialogue, plans, feelings, or key actions. No score or creative setting may override this.`,
-        'The 0–10 signals are descriptive estimates, not objectives to maximize. Use only relevant, evidence-backed signals; textual state and accepted story facts take precedence.',
+        'Behavior signals are coarse descriptive estimates, not objectives to maximize. Accepted story facts and textual state take precedence.',
         `Use this state as latent context. Let "${characterName}" choose naturally; do not force every item into the next reply. Character card, established chat facts, and world rules take precedence.`,
         '[/Current Living State]',
     ];
-    return lines.filter(Boolean).join('\n');
+    const candidates = [
+        promptTextCandidate(10, 0, 'Scene', [state.scene.location, state.scene.immediateSituation], 220),
+        promptTextCandidate(20, 2, 'Present', [state.scene.presentCharacters.join('、')], 100),
+        promptTextCandidate(30, 0, `${characterName}.Mood`, [state.character.currentMood], 150),
+        promptTextCandidate(40, 3, `${characterName}.Physical state`, [state.character.physicalState], 100),
+        promptTextCandidate(50, 2, `${characterName}.Attention`, [state.character.attentionFocus], 120),
+        promptTextCandidate(60, 0, `${characterName}.Current goal`, [state.character.currentGoal], 140),
+        promptTextCandidate(70, 1, `${characterName}.Concern`, [state.character.currentConcern], 140),
+        promptTextCandidate(80, 0, `${characterName}.Plan`, [state.agency.currentPlan], 160),
+        promptTextCandidate(90, 2, `${characterName}.Possible initiative`, [state.agency.initiativeSeed], 130),
+        promptTextCandidate(100, 2, `${characterName}.Impulse / inhibition`, [state.character.privateImpulse, state.character.inhibition], 180),
+        promptTextCandidate(110, 1, `${characterName}.Boundary`, [state.agency.boundary, state.agency.responseIfBlocked], 180),
+        promptTextCandidate(120, 0, `Relationship (${characterName} toward ${counterpartName})`, [state.relationship.trust, state.relationship.emotionalCloseness, state.relationship.authorityDynamic, state.relationship.currentTension], 260),
+        promptSignalCandidate(130, 1, state.signals),
+        promptListCandidate(140, 4, `${characterName}.Evolved preferences`, state.relationship.evolvedPreferences, 1),
+        promptListCandidate(150, 4, `${characterName}.Recent offscreen events`, state.offscreenLife.recentEvents, 1),
+        promptListCandidate(160, 1, `${characterName}.Upcoming obligations`, state.offscreenLife.upcomingObligations, 2),
+        promptListCandidate(170, 4, `${characterName}.People on mind`, state.offscreenLife.peopleOnMind, 1),
+        promptListCandidate(180, 1, 'Important continuity facts', state.continuity.importantFacts, 3),
+        promptListCandidate(190, 1, 'Open promises', state.continuity.openPromises, 2),
+        promptListCandidate(200, 1, 'Open threads', state.continuity.openThreads, 2),
+        promptListCandidate(210, 3, 'Recent turning points', state.recentTurningPoints, 1),
+    ];
+    return composeBudgetedPrompt(fixedStart, candidates, fixedEnd);
 }
 
 export function normalizeGuidance(input = {}) {
@@ -347,9 +351,16 @@ function applySignalChanges(target, changes, allowedEvidence) {
         if (!Number.isFinite(value) || evidenceMessageIds.length === 0) continue;
         const previous = normalizeSignal(target[key]);
         const requested = Math.min(10, Math.max(0, Math.round(value)));
+        if (definition.slowPositive && previous.value !== null && requested > previous.value) {
+            const previousEvidenceId = Math.max(-1, ...previous.evidenceMessageIds);
+            const candidateEvidenceId = Math.max(...evidenceMessageIds);
+            const hasEnoughNewHistory = previousEvidenceId < 0 || candidateEvidenceId - previousEvidenceId >= 4;
+            const hasStrongEvidenceAtHighLevels = previous.value < 8 || candidate.confidence === 'high';
+            if (!hasEnoughNewHistory || !hasStrongEvidenceAtHighLevels) continue;
+        }
         const nextValue = previous.value === null
             ? requested
-            : Math.min(previous.value + definition.maximumStep, Math.max(previous.value - definition.maximumStep, requested));
+            : Math.min(previous.value + (definition.slowPositive ? 1 : definition.maximumStep), Math.max(previous.value - definition.maximumStep, requested));
         target[key] = {
             value: nextValue,
             confidence: CONFIDENCE_LEVELS.has(candidate.confidence) ? candidate.confidence : 'low',
@@ -421,16 +432,12 @@ function cleanString(value) {
     return typeof value === 'string' ? value.trim().slice(0, 1000) : '';
 }
 
-function formatLine(label, value) {
-    return value ? `${label}: ${value}` : '';
-}
-
 function formatSignalLine(signals) {
     const values = Object.entries(SIGNAL_DEFINITIONS)
         .map(([key, definition]) => {
             const signal = normalizeSignal(signals?.[key]);
             if (signal.value === null) return '';
-            return `${definition.promptLabel} ${signal.value}/10 (${[signal.confidence, signal.reason].filter(Boolean).join('；')})`;
+            return `${definition.promptLabel} ${signalBand(signal.value)}`;
         })
         .filter(Boolean);
     return values.length ? `Behavior signals: ${values.join('；')}` : '';
@@ -459,24 +466,98 @@ function formatNarrativeGuidance(input, characterName, counterpartName) {
         expressive: `You may render short natural ${counterpartName} exchanges when their stance is already established, but must stop before any new commitment, escalation, key action, or private intent.`,
     }[guidance.userMicroAgency];
     return [
-        `Narrative Guidance: state=${guidance.stateInfluence}; initiative=${guidance.initiative}; pacing=${guidance.pacing}; user micro-agency=${guidance.userMicroAgency}.`,
-        stateInfluence,
-        initiative,
-        pacing,
-        userMicroAgency,
+        `State use: ${stateInfluence}`,
+        `Agency and pacing: ${initiative} ${pacing}`,
+        `User portrayal: ${userMicroAgency}`,
     ];
 }
 
 function formatPromptList(label, items, limit, seen) {
     const values = [];
     for (const item of [...items].reverse()) {
-        const value = cleanString(item?.text);
+        const value = compactPromptText(item?.text, 110);
         if (!value || seen.some(previous => areNearDuplicate(previous, value))) continue;
-        values.unshift(value);
+        values.push(value);
         seen.push(value);
         if (values.length >= limit) break;
     }
     return values.length ? `${label}: ${values.join('；')}` : '';
+}
+
+function promptTextCandidate(order, priority, label, parts, maximumCharacters) {
+    return {
+        order,
+        priority,
+        render(seen) {
+            const values = [];
+            const localSeen = [...seen];
+            for (const part of parts) {
+                const value = compactPromptText(part, Math.max(60, Math.floor(maximumCharacters / Math.max(1, parts.length))));
+                if (!value || localSeen.some(previous => areNearDuplicate(previous, value))) continue;
+                values.push(value);
+                localSeen.push(value);
+            }
+            const joined = compactPromptText(values.join('；'), maximumCharacters);
+            return joined ? { line: `${label}: ${joined}`, values } : null;
+        },
+    };
+}
+
+function promptListCandidate(order, priority, label, items, limit) {
+    return {
+        order,
+        priority,
+        render(seen) {
+            const localSeen = [...seen];
+            const line = formatPromptList(label, items, limit, localSeen);
+            return line ? { line, values: localSeen.slice(seen.length) } : null;
+        },
+    };
+}
+
+function promptSignalCandidate(order, priority, signals) {
+    return {
+        order,
+        priority,
+        render() {
+            const line = formatSignalLine(signals);
+            return line ? { line, values: [] } : null;
+        },
+    };
+}
+
+function composeBudgetedPrompt(fixedStart, candidates, fixedEnd) {
+    const start = fixedStart.filter(Boolean);
+    const end = fixedEnd.filter(Boolean);
+    const fixedCharacters = [...start, ...end].join('\n').length;
+    let remaining = Math.max(0, PROMPT_BUDGET_CHARACTERS - fixedCharacters - start.length - end.length);
+    const seen = [];
+    const selected = [];
+    for (const candidate of [...candidates].sort((left, right) => left.priority - right.priority || left.order - right.order)) {
+        const rendered = candidate.render(seen);
+        if (!rendered || rendered.line.length + 1 > remaining) continue;
+        selected.push({ order: candidate.order, line: rendered.line });
+        seen.push(...rendered.values);
+        remaining -= rendered.line.length + 1;
+    }
+    return [...start, ...selected.sort((left, right) => left.order - right.order).map(item => item.line), ...end].join('\n');
+}
+
+function compactPromptText(value, maximumCharacters) {
+    const text = cleanString(value).replace(/\s+/g, ' ');
+    if (text.length <= maximumCharacters) return text;
+    const prefix = text.slice(0, Math.max(1, maximumCharacters - 1));
+    const minimumBoundary = Math.floor(prefix.length * 0.6);
+    const boundary = Math.max(prefix.lastIndexOf('。'), prefix.lastIndexOf('；'), prefix.lastIndexOf('！'), prefix.lastIndexOf('？'));
+    return `${prefix.slice(0, boundary >= minimumBoundary ? boundary + 1 : prefix.length).trim()}…`;
+}
+
+function signalBand(value) {
+    if (value <= 2) return 'very low';
+    if (value <= 4) return 'low';
+    if (value <= 6) return 'moderate';
+    if (value <= 8) return 'high';
+    return 'very high';
 }
 
 function areNearDuplicate(left, right) {
