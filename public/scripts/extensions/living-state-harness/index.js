@@ -8,6 +8,7 @@ import {
     getCharacterCardFields,
     saveSettingsDebounced,
     setExtensionPrompt,
+    syncMesToSwipe,
     this_chid,
     updateMessageBlock,
 } from '../../../script.js';
@@ -17,26 +18,23 @@ import { removeReasoningFromString } from '../../reasoning.js';
 import { selected_group } from '../../group-chats.js';
 import { Popup } from '../../popup.js';
 import {
-    OUTPUT_VALIDATION_KEY,
     PROMPT_KEY,
-    RESPONSE_PROMPT_KEY,
     REASONING_RECOVERY_KEY,
     SNAPSHOT_KEY,
-    applyStoryResponseContract,
     assertDeltaSubject,
     collectMessages,
     createEmptyState,
     findLatestSnapshot,
-    formatResponseContract,
     formatStateForPrompt,
     invalidateSnapshots,
     mergeDelta,
     normalizeState,
     recoverStoryContentFromReasoning,
-    validateStoryResponse,
+    saveStateSnapshot,
 } from './state.js';
 
 const MODULE_NAME = 'livingStateHarness';
+const LEGACY_RESPONSE_PROMPT_KEY = 'living_state_harness_response_contract';
 const DEFAULT_SETTINGS = Object.freeze({
     enabled: false,
     frozen: false,
@@ -44,11 +42,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     updaterModel: 'deepseek-v4-flash',
     responseTokens: 8192,
     messageWindow: 20,
-    responseContractEnabled: true,
-    outputValidationEnabled: true,
     recoverStoryFromReasoning: true,
-    minimumBodyCharacters: 1500,
-    maximumBodyCharacters: 2000,
     authorLocks: [
         '不得替用户决定思想、台词或关键行动',
         '角色不能使用尚未在剧情中获知的秘密',
@@ -64,11 +58,12 @@ let lastRuntime = {
     updaterOutputTokens: null,
     injectionTokens: null,
     delta: null,
-    outputValidation: null,
     updatedAt: null,
 };
 let backgroundUpdateRunning = false;
 let backgroundStartedAt = 0;
+let historyRevision = 0;
+let pendingStateUpdate = null;
 let ecotRenderQueued = false;
 
 function enhanceEcotBlocks(root = document) {
@@ -115,13 +110,6 @@ function getSettings() {
     return extension_settings[MODULE_NAME];
 }
 
-function enforceStoryOutputContract(generateData) {
-    const settings = getSettings();
-    const storyTypes = new Set(['normal', 'regenerate', 'swipe', 'continue', 'append']);
-    if (!settings.enabled || !storyTypes.has(generateData?.type)) return;
-    applyStoryResponseContract(generateData, settings);
-}
-
 function getSubjectIdentity(context = getContext()) {
     return {
         role: 'character',
@@ -152,7 +140,11 @@ async function interceptor() {
 
 async function updateStateInBackground(messageId, type) {
     const settings = getSettings();
-    if (!settings.enabled || settings.frozen || selected_group || type === 'first_message' || backgroundUpdateRunning) return;
+    if (!settings.enabled || settings.frozen || selected_group || type === 'first_message') return;
+    if (backgroundUpdateRunning) {
+        pendingStateUpdate = { messageId, type };
+        return;
+    }
 
     const context = getContext();
     const chat = context.chat;
@@ -171,6 +163,7 @@ async function updateStateInBackground(messageId, type) {
 
     backgroundUpdateRunning = true;
     backgroundStartedAt = performance.now();
+    const updateRevision = historyRevision;
     lastRuntime = { ...lastRuntime, status: 'updating', error: '' };
     updateUi();
     const startedAt = performance.now();
@@ -180,8 +173,15 @@ async function updateStateInBackground(messageId, type) {
         const updaterInputTokens = await safeTokenCount(prompt);
         const delta = await runUpdaterWithRetry(prompt, settings.responseTokens, settings.updaterModel, subject);
         const updaterOutputTokens = await safeTokenCount(JSON.stringify(delta));
+        if (updateRevision !== historyRevision || getContext().chat !== chat || chat[targetMessageId] !== targetMessage) {
+            lastRuntime = { ...lastRuntime, status: 'stale', error: '', updatedAt: new Date().toISOString() };
+            await restoreInjection();
+            return;
+        }
         const { state, changed } = mergeDelta(previousState, delta, messages.map(message => message.id), targetMessageId, subject);
-        saveSnapshot(targetMessage, state, delta, changed);
+        saveSnapshot(targetMessage, targetMessageId, state, delta, changed, 'post-response');
+        syncMesToSwipe(targetMessageId);
+        carryStateForwardToPendingUser(chat, targetMessageId, state);
         await context.saveChat();
         await injectPrompts(state);
         lastRuntime = {
@@ -190,12 +190,8 @@ async function updateStateInBackground(messageId, type) {
             durationMs: Math.round(performance.now() - startedAt),
             updaterInputTokens,
             updaterOutputTokens,
-            injectionTokens: await safeTokenCount([
-                formatStateForPrompt(state),
-                settings.responseContractEnabled ? formatResponseContract(settings) : '',
-            ].filter(Boolean).join('\n')),
+            injectionTokens: await safeTokenCount(formatStateForPrompt(state)),
             delta,
-            outputValidation: lastRuntime.outputValidation,
             updatedAt: new Date().toISOString(),
         };
     } catch (error) {
@@ -212,6 +208,9 @@ async function updateStateInBackground(messageId, type) {
     } finally {
         backgroundUpdateRunning = false;
         backgroundStartedAt = 0;
+        const pending = pendingStateUpdate;
+        pendingStateUpdate = null;
+        if (pending) setTimeout(() => void updateStateInBackground(pending.messageId, pending.type), 0);
     }
 
     updateUi();
@@ -254,59 +253,48 @@ async function runUpdaterWithRetry(prompt, responseLength, model, subject) {
 async function injectPrompts(state) {
     const settings = getSettings();
     const statePrompt = state ? formatStateForPrompt(state) : '';
-    const responsePrompt = settings.responseContractEnabled ? formatResponseContract(settings) : '';
     setExtensionPrompt(PROMPT_KEY, statePrompt, extension_prompt_types.IN_CHAT, settings.depth, false, extension_prompt_roles.SYSTEM);
-    setExtensionPrompt(RESPONSE_PROMPT_KEY, responsePrompt, extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
-    lastRuntime.injectionTokens = await safeTokenCount([statePrompt, responsePrompt].filter(Boolean).join('\n'));
+    setExtensionPrompt(LEGACY_RESPONSE_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+    lastRuntime.injectionTokens = await safeTokenCount(statePrompt);
 }
 
 function clearInjection() {
     setExtensionPrompt(PROMPT_KEY, '', extension_prompt_types.IN_CHAT, getSettings().depth, false, extension_prompt_roles.SYSTEM);
-    setExtensionPrompt(RESPONSE_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+    setExtensionPrompt(LEGACY_RESPONSE_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
 }
 
-async function validateReceivedResponse(messageId, type) {
+async function recoverReceivedResponse(messageId, type) {
     const settings = getSettings();
     if (!settings.enabled || type === 'first_message' || selected_group) return;
     const context = getContext();
     const message = context.chat?.[Number(messageId)];
     if (!message || message.is_user) return;
 
-    let recovered = false;
     if (settings.recoverStoryFromReasoning) {
         const recovery = recoverStoryContentFromReasoning(message.mes, message.extra?.reasoning);
         if (recovery.recovered) {
-            recovered = true;
             message.mes = recovery.content;
             message.extra ??= {};
             message.extra.reasoning = recovery.remainingReasoning;
             message.extra[REASONING_RECOVERY_KEY] = { recoveredAt: new Date().toISOString() };
             updateMessageBlock(Number(messageId), message);
+            await context.saveChat();
             toastr.info('已将误入思考通道的结构化正文恢复到正文区。', 'Living State Harness');
         }
     }
-
-    const validation = validateStoryResponse(message.mes, settings);
-    if (settings.outputValidationEnabled) {
-        message.extra ??= {};
-        message.extra[OUTPUT_VALIDATION_KEY] = { ...validation, checkedAt: new Date().toISOString() };
-        lastRuntime = { ...lastRuntime, outputValidation: validation };
-    }
-    if (recovered || settings.outputValidationEnabled) await context.saveChat();
     updateUi();
-
-    if (settings.outputValidationEnabled && validation.status === 'fail') toastr.warning(validation.issues.join('；'), '正文结构检查');
 }
 
-function saveSnapshot(message, state, delta, changed) {
-    message.extra ??= {};
-    message.extra[SNAPSHOT_KEY] = {
-        valid: true,
-        changed,
-        state,
-        delta,
-        savedAt: new Date().toISOString(),
-    };
+function saveSnapshot(message, messageId, state, delta, changed, kind) {
+    return saveStateSnapshot(message, messageId, state, { delta, changed, kind });
+}
+
+function carryStateForwardToPendingUser(chat, assistantMessageId, state) {
+    const nextMessageId = Number(assistantMessageId) + 1;
+    const nextMessage = chat[nextMessageId];
+    if (!nextMessage?.is_user) return false;
+    saveSnapshot(nextMessage, nextMessageId, state, { source: 'carried-forward' }, false, 'pre-generation');
+    return true;
 }
 
 function buildUpdaterPrompt(previousState, messages, authorLocks, subject) {
@@ -420,6 +408,7 @@ function assertEvidenceBackedAdditions(delta) {
 }
 
 async function onHistoryChanged(messageId) {
+    historyRevision += 1;
     const context = getContext();
     if (!Array.isArray(context.chat)) return;
     if (invalidateSnapshots(context.chat, messageId)) {
@@ -430,13 +419,75 @@ async function onHistoryChanged(messageId) {
     updateUi();
 }
 
-async function onMessagesDeleted() {
+async function onMessageSent(messageId) {
+    const settings = getSettings();
+    if (!settings.enabled || selected_group) return;
+    const context = getContext();
+    const chat = context.chat;
+    const targetMessageId = Number(messageId);
+    const targetMessage = chat?.[targetMessageId];
+    if (!Array.isArray(chat) || !targetMessage?.is_user || !characters[this_chid]) return;
+
+    const subject = getSubjectIdentity(context);
+    const previous = findLatestSnapshot(chat, targetMessageId - 1, subject);
+    const state = previous?.state ?? createEmptyState(subject);
+    if (targetMessageId < chat.length - 1) invalidateSnapshots(chat, targetMessageId + 1);
+    saveSnapshot(targetMessage, targetMessageId, state, { source: 'pre-generation' }, false, 'pre-generation');
+    await context.saveChat();
+    await injectPrompts(state);
+    updateUi();
+}
+
+async function onGenerationStarted(type, _options, dryRun) {
+    const settings = getSettings();
+    if (dryRun || !settings.enabled || selected_group || !['regenerate', 'swipe'].includes(type)) return;
+    const context = getContext();
+    const chat = context.chat;
+    const responseMessageId = Array.isArray(chat) ? chat.length - 1 : -1;
+    const responseMessage = chat?.[responseMessageId];
+    if (!responseMessage || responseMessage.is_user || !characters[this_chid]) return;
+
+    historyRevision += 1;
+    const subject = getSubjectIdentity(context);
+    const previous = findLatestSnapshot(chat, responseMessageId - 1, subject);
+    const state = previous?.state ?? createEmptyState(subject);
+    let snapshotChanged = false;
+
+    const checkpointMessageId = responseMessageId - 1;
+    const checkpointMessage = chat[checkpointMessageId];
+    if (checkpointMessage?.is_user && previous?.index !== checkpointMessageId) {
+        saveSnapshot(checkpointMessage, checkpointMessageId, state, { source: 'pre-regeneration' }, false, 'pre-generation');
+        snapshotChanged = true;
+    }
+
+    const isNewSwipeSlot = type === 'swipe'
+        && Number.isInteger(responseMessage.swipe_id)
+        && responseMessage.swipe_id >= (responseMessage.swipes?.length ?? 0);
+    if (isNewSwipeSlot && responseMessage.extra?.[SNAPSHOT_KEY]) {
+        delete responseMessage.extra[SNAPSHOT_KEY];
+        snapshotChanged = true;
+    }
+
+    if (snapshotChanged) await context.saveChat();
+    await injectPrompts(state);
+    updateUi();
+}
+
+async function onMessagesDeleted(deletedFromMessageId) {
+    historyRevision += 1;
     const context = getContext();
     if (!Array.isArray(context.chat)) return;
-    if (invalidateSnapshots(context.chat, 0)) {
+    const deletionBoundary = Number.isInteger(Number(deletedFromMessageId)) ? Number(deletedFromMessageId) : context.chat.length;
+    if (invalidateSnapshots(context.chat, deletionBoundary)) {
         await context.saveChat();
         lastRuntime = { ...lastRuntime, status: 'stale', error: '' };
     }
+    await restoreInjection();
+    updateUi();
+}
+
+async function onMessageSwiped() {
+    historyRevision += 1;
     await restoreInjection();
     updateUi();
 }
@@ -451,6 +502,8 @@ async function restoreInjection() {
 }
 
 async function resetState() {
+    historyRevision += 1;
+    pendingStateUpdate = null;
     const context = getContext();
     if (!Array.isArray(context.chat)) return;
     for (const message of context.chat) {
@@ -478,7 +531,8 @@ async function saveManualState() {
         const state = normalizeState(JSON.parse(String($('#lsh_raw_state').val())), getSubjectIdentity(context));
         state.version += 1;
         state.processedThroughMessageId = context.chat.indexOf(message);
-        saveSnapshot(message, state, { source: 'manual' }, true);
+        const messageId = context.chat.indexOf(message);
+        saveSnapshot(message, messageId, state, { source: 'manual' }, true, 'manual');
         await context.saveChat();
         await injectPrompts(state);
         lastRuntime = { ...lastRuntime, status: 'manual', error: '', delta: { source: 'manual' }, updatedAt: new Date().toISOString() };
@@ -521,34 +575,9 @@ function bindSettings() {
         $(this).val(settings.messageWindow);
         saveSettingsDebounced();
     });
-    $('#lsh_response_contract').prop('checked', settings.responseContractEnabled).on('input', async function () {
-        settings.responseContractEnabled = Boolean($(this).prop('checked'));
-        saveSettingsDebounced();
-        await restoreInjection();
-        updateUi();
-    });
-    $('#lsh_output_validation').prop('checked', settings.outputValidationEnabled).on('input', function () {
-        settings.outputValidationEnabled = Boolean($(this).prop('checked'));
-        saveSettingsDebounced();
-        updateUi();
-    });
     $('#lsh_recover_reasoning_story').prop('checked', settings.recoverStoryFromReasoning).on('input', function () {
         settings.recoverStoryFromReasoning = Boolean($(this).prop('checked'));
         saveSettingsDebounced();
-    });
-    $('#lsh_minimum_body_characters').val(settings.minimumBodyCharacters).on('change', async function () {
-        settings.minimumBodyCharacters = clamp(Number($(this).val()), 200, 12000);
-        if (settings.maximumBodyCharacters < settings.minimumBodyCharacters) settings.maximumBodyCharacters = settings.minimumBodyCharacters;
-        $(this).val(settings.minimumBodyCharacters);
-        $('#lsh_maximum_body_characters').val(settings.maximumBodyCharacters);
-        saveSettingsDebounced();
-        await restoreInjection();
-    });
-    $('#lsh_maximum_body_characters').val(settings.maximumBodyCharacters).on('change', async function () {
-        settings.maximumBodyCharacters = clamp(Number($(this).val()), settings.minimumBodyCharacters, 16000);
-        $(this).val(settings.maximumBodyCharacters);
-        saveSettingsDebounced();
-        await restoreInjection();
     });
     $('#lsh_author_locks').val(settings.authorLocks).on('input', function () {
         settings.authorLocks = String($(this).val());
@@ -575,8 +604,6 @@ function updateUi() {
     const characterName = subject.name || '未选择角色';
     const counterpartName = subject.counterpartName || '用户';
     const status = getStatusPresentation(settings, latest);
-    const latestAssistant = [...(context.chat ?? [])].reverse().find(message => !message.is_user);
-    const outputValidation = latestAssistant?.extra?.[OUTPUT_VALIDATION_KEY] ?? lastRuntime.outputValidation;
 
     $('#lsh_character_name').text(characterName);
     $('#lsh_now_title').text(`${characterName} · 此刻状态`);
@@ -618,7 +645,6 @@ function updateUi() {
         ['未完成线索', state.continuity.openThreads],
         ['近期转折点', state.recentTurningPoints],
     ]);
-    renderOutputValidation(outputValidation, settings);
     $('#lsh_metrics').empty()
         .append(metric('状态版本', state.version))
         .append(metric('已处理消息', state.processedThroughMessageId))
@@ -628,26 +654,6 @@ function updateUi() {
         .append(metric('耗时', lastRuntime.durationMs ? `${lastRuntime.durationMs} 毫秒` : '—'));
     $('#lsh_delta_preview').text(lastRuntime.error || JSON.stringify(lastRuntime.delta, null, 2) || '暂无更新记录。');
     if (!$('#lsh_raw_state').is(':focus')) $('#lsh_raw_state').val(JSON.stringify(state, null, 2));
-}
-
-function renderOutputValidation(validation, settings) {
-    $('#lsh_output_card').attr('data-state', validation?.status ?? 'idle');
-    if (!settings.outputValidationEnabled) {
-        $('#lsh_output_status').text('已关闭');
-        $('#lsh_output_length').text('未检查');
-        $('#lsh_output_issues').text('可在扩展设置中重新启用。');
-        return;
-    }
-    if (!validation) {
-        $('#lsh_output_status').text('等待下一次回复');
-        $('#lsh_output_length').text(`目标 ${settings.minimumBodyCharacters}–${settings.maximumBodyCharacters} 字`);
-        $('#lsh_output_issues').text('只统计 <content> 内的非空白字符。');
-        return;
-    }
-    const labels = { pass: '通过', warning: '有提示', fail: '未通过' };
-    $('#lsh_output_status').text(labels[validation.status] ?? validation.status);
-    $('#lsh_output_length').text(`正文 ${validation.bodyCharacters} / ${validation.minimumBodyCharacters}–${validation.maximumBodyCharacters} 字`);
-    $('#lsh_output_issues').text(validation.issues?.length ? validation.issues.join('；') : '正文长度、区块顺序和思考泄漏检查均通过。');
 }
 
 function getStatusPresentation(settings, latest) {
@@ -728,16 +734,19 @@ export async function init() {
     bindSettings();
     observeEcotRendering();
     eventSource.on(event_types.CHAT_CHANGED, async () => {
+        historyRevision += 1;
+        pendingStateUpdate = null;
         await restoreInjection();
         updateUi();
     });
-    eventSource.on(event_types.CHAT_COMPLETION_SETTINGS_READY, enforceStoryOutputContract);
+    eventSource.on(event_types.MESSAGE_SENT, onMessageSent);
+    eventSource.on(event_types.GENERATION_STARTED, onGenerationStarted);
     eventSource.on(event_types.MESSAGE_EDITED, onHistoryChanged);
     eventSource.on(event_types.MESSAGE_DELETED, onMessagesDeleted);
-    eventSource.on(event_types.MESSAGE_SWIPED, updateUi);
+    eventSource.on(event_types.MESSAGE_SWIPED, onMessageSwiped);
     eventSource.on(event_types.MESSAGE_RECEIVED, (messageId, type) => {
         setTimeout(() => void (async () => {
-            await validateReceivedResponse(messageId, type);
+            await recoverReceivedResponse(messageId, type);
             await updateStateInBackground(messageId, type);
         })(), 0);
     });

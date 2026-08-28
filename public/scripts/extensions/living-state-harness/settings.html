@@ -33,26 +33,10 @@
             <label for="lsh_message_window">每次最多分析的新消息数</label>
             <input id="lsh_message_window" class="text_pole" type="number" min="2" max="50" step="1">
             <hr>
-            <label class="checkbox_label" for="lsh_response_contract">
-                <input id="lsh_response_contract" type="checkbox">
-                <span>注入正文结构与字数护栏</span>
-            </label>
-            <label class="checkbox_label" for="lsh_output_validation">
-                <input id="lsh_output_validation" type="checkbox">
-                <span>回复后检查正文长度与区块顺序</span>
-            </label>
             <label class="checkbox_label" for="lsh_recover_reasoning_story">
                 <input id="lsh_recover_reasoning_story" type="checkbox">
                 <span>正文误入 reasoning 时自动恢复（仅限完整 &lt;content&gt;）</span>
             </label>
-            <div class="flex-container">
-                <label class="flex1" for="lsh_minimum_body_characters">正文最少字数
-                    <input id="lsh_minimum_body_characters" class="text_pole" type="number" min="200" max="12000" step="100">
-                </label>
-                <label class="flex1" for="lsh_maximum_body_characters">正文最多字数
-                    <input id="lsh_maximum_body_characters" class="text_pole" type="number" min="200" max="16000" step="100">
-                </label>
-            </div>
             <label for="lsh_author_locks">作者约束（每行一条）</label>
             <textarea id="lsh_author_locks" class="text_pole textarea_compact" rows="4"></textarea>
             <div class="flex-container">
@@ -65,7 +49,7 @@
                     <span>下一轮重新建立</span>
                 </button>
             </div>
-            <small class="lsh-muted">仅追踪当前 char 的内在状态与自主性；user 只作为关系对手方和客观事件参与者。Harness 不修改原生 thinking/reasoning 设置；若完整正文误入 reasoning，只恢复正文并保留其余思考。正文必须直接从 &lt;content&gt; 开始。</small>
+            <small class="lsh-muted">仅追踪当前 char 的内在状态、自主性与剧情连续性；不注入正文结构、字数或节奏规则，也不修改原生 thinking/reasoning 设置。若完整正文误入 reasoning，只恢复正文并保留其余思考。</small>
         </div>
     </div>
 </div>

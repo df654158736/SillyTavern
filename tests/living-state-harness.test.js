@@ -2,19 +2,16 @@ import { describe, expect, test } from '@jest/globals';
 
 import {
     SNAPSHOT_KEY,
-    applyStoryResponseContract,
-    appendTerminalResponseContract,
     collectMessages,
     createEmptyState,
     findLatestSnapshot,
-    formatResponseContract,
     formatStateForPrompt,
     invalidateSnapshots,
     mergeDelta,
     normalizeState,
     recoverStoryContentFromReasoning,
+    saveStateSnapshot,
     sanitizeEvidenceText,
-    validateStoryResponse,
 } from '../public/scripts/extensions/living-state-harness/state.js';
 
 describe('Living State Harness state ledger', () => {
@@ -70,6 +67,8 @@ describe('Living State Harness state ledger', () => {
         expect(prompt).toContain('小雅.Plan');
         expect(prompt).toContain('Relationship (小雅 toward D)');
         expect(prompt).toContain('never to user "D"');
+        expect(prompt).not.toContain('Response Contract');
+        expect(prompt).not.toContain('剧情推进单元');
         expect(normalizeState(JSON.parse(JSON.stringify(result.state)))).toEqual(result.state);
     });
 
@@ -125,6 +124,74 @@ describe('Living State Harness state ledger', () => {
         expect(findLatestSnapshot(chat, Number.POSITIVE_INFINITY, subject)?.index).toBe(0);
     });
 
+    test('rolls a deleted assistant reply back to the surviving pre-generation checkpoint', () => {
+        const stateBeforeReply = createEmptyState(subject);
+        stateBeforeReply.version = 3;
+        stateBeforeReply.processedThroughMessageId = 2;
+        stateBeforeReply.character.currentMood = '谨慎期待';
+        const stateAfterReply = normalizeState(stateBeforeReply, subject);
+        stateAfterReply.version = 4;
+        stateAfterReply.processedThroughMessageId = 4;
+        stateAfterReply.character.currentMood = '因已经发生的拥抱而放松';
+
+        const chat = [
+            { is_user: false, mes: '较早的角色回复' },
+            { is_user: true, mes: '较早的用户回复' },
+            { is_user: false, mes: '上一轮角色回复' },
+            { is_user: true, mes: '这次用户输入' },
+            { is_user: false, mes: '稍后被删除的角色回复' },
+        ];
+        saveStateSnapshot(chat[3], 3, stateBeforeReply, { kind: 'pre-generation' });
+        saveStateSnapshot(chat[4], 4, stateAfterReply, { kind: 'post-response' });
+
+        chat.length = 4;
+        invalidateSnapshots(chat, chat.length);
+        const restored = findLatestSnapshot(chat, Number.POSITIVE_INFINITY, subject);
+
+        expect(restored?.index).toBe(3);
+        expect(restored?.snapshot.kind).toBe('pre-generation');
+        expect(restored?.state.version).toBe(3);
+        expect(restored?.state.character.currentMood).toBe('谨慎期待');
+        expect(restored?.state.character.currentMood).not.toContain('拥抱');
+    });
+
+    test('uses the previous accepted snapshot as a safe legacy regeneration baseline', () => {
+        const acceptedState = createEmptyState(subject);
+        acceptedState.version = 2;
+        acceptedState.processedThroughMessageId = 1;
+        const deletedReplyState = normalizeState(acceptedState, subject);
+        deletedReplyState.version = 3;
+        deletedReplyState.processedThroughMessageId = 3;
+
+        const chat = [
+            { is_user: true, mes: '开场' },
+            { is_user: false, mes: '已接受回复' },
+            { is_user: true, mes: '要求继续' },
+            { is_user: false, mes: '旧版扩展保存、即将重生成的回复' },
+        ];
+        saveStateSnapshot(chat[1], 1, acceptedState, { kind: 'post-response' });
+        saveStateSnapshot(chat[3], 3, deletedReplyState, { kind: 'post-response' });
+
+        expect(findLatestSnapshot(chat, 2, subject)?.state.version).toBe(2);
+        expect(findLatestSnapshot(chat, 2, subject)?.state.processedThroughMessageId).toBe(1);
+    });
+
+    test('ignores snapshots whose message anchor or swipe branch no longer matches', () => {
+        const state = createEmptyState(subject);
+        state.version = 5;
+        const shiftedMessage = { is_user: false, mes: '发生过前序删除', swipe_id: 0 };
+        saveStateSnapshot(shiftedMessage, 2, state, { kind: 'post-response' });
+
+        expect(findLatestSnapshot([shiftedMessage], Number.POSITIVE_INFINITY, subject)).toBeNull();
+
+        saveStateSnapshot(shiftedMessage, 0, state, { kind: 'post-response' });
+        shiftedMessage.swipe_id = 1;
+        expect(findLatestSnapshot([shiftedMessage], Number.POSITIVE_INFINITY, subject)).toBeNull();
+
+        shiftedMessage.swipe_id = 0;
+        expect(findLatestSnapshot([shiftedMessage], Number.POSITIVE_INFINITY, subject)?.state.version).toBe(5);
+    });
+
     test('rejects a delta owned by the user instead of the active character', () => {
         expect(() => mergeDelta(createEmptyState(subject), {
             subject: { role: 'user', name: 'D' },
@@ -151,35 +218,6 @@ describe('Living State Harness state ledger', () => {
         expect(collectMessages(chat, -1, 2, 2).map(message => message.id)).toEqual([1, 2]);
     });
 
-    test('counts only content body characters and ignores later summary or branch blocks', () => {
-        const body = '雅'.repeat(1500);
-        const response = `<content>${body}</content><meow_FM>${'摘要'.repeat(300)}</meow_FM><branches>${'分支'.repeat(300)}</branches>`;
-        const validation = validateStoryResponse(response, { minimumBodyCharacters: 1500, maximumBodyCharacters: 2000 });
-
-        expect(validation.status).toBe('pass');
-        expect(validation.bodyCharacters).toBe(1500);
-        expect(validation.hasUnexpectedPrefix).toBe(false);
-    });
-
-    test('fails a reply whose whole output is long but content body is short', () => {
-        const response = `<content>${'正文'.repeat(480)}</content><meow_FM>${'摘要'.repeat(400)}</meow_FM>`;
-        const validation = validateStoryResponse(response, { minimumBodyCharacters: 1500, maximumBodyCharacters: 2000 });
-
-        expect(response.length).toBeGreaterThan(1500);
-        expect(validation.status).toBe('fail');
-        expect(validation.bodyCharacters).toBe(960);
-        expect(validation.issues[0]).toContain('少于下限');
-    });
-
-    test('flags reasoning markers and incorrect block order', () => {
-        const response = `<meow_FM>先摘要</meow_FM>ECoT：规划<content>${'雅'.repeat(1500)}</content>`;
-        const validation = validateStoryResponse(response);
-
-        expect(validation.status).toBe('fail');
-        expect(validation.orderValid).toBe(false);
-        expect(validation.reasoningLeak).toBe(true);
-    });
-
     test('recovers only a complete structured story from an otherwise empty reasoning response', () => {
         const reasoning = '内部规划，不应展示。\n<content>真正正文</content>\n<meow_FM>摘要</meow_FM>\n<branches>分支</branches>';
         const result = recoverStoryContentFromReasoning('', reasoning);
@@ -195,52 +233,4 @@ describe('Living State Harness state ledger', () => {
         expect(recoverStoryContentFromReasoning('已有正文', '<content>另一份正文</content>').recovered).toBe(false);
     });
 
-    test('rejects any text before the content block', () => {
-        const response = `先确认任务。\n<content>${'雅'.repeat(1500)}</content>`;
-        const validation = validateStoryResponse(response);
-
-        expect(validation.status).toBe('fail');
-        expect(validation.hasUnexpectedPrefix).toBe(true);
-        expect(validation.issues).toContain('正文前存在不允许的元叙事、前言或其他文本');
-    });
-
-    test('places the response contract after late conflicting output instructions', () => {
-        const messages = [
-            { role: 'system', content: '普通规则' },
-            { role: 'system', content: '先输出任务确认，再开始正文' },
-        ];
-        appendTerminalResponseContract(messages, { minimumBodyCharacters: 1500, maximumBodyCharacters: 2000 });
-
-        expect(messages).toHaveLength(3);
-        expect(messages.at(-1).content).toContain('terminal output instruction');
-        expect(messages.at(-1).content).toContain('Begin directly with <content>');
-    });
-
-    test('never overrides native thinking or reasoning request settings', () => {
-        const generateData = {
-            type: 'normal',
-            messages: [{ role: 'user', content: '继续剧情' }],
-            thinking: { type: 'enabled' },
-            include_reasoning: true,
-            reasoning_effort: 'auto',
-        };
-
-        applyStoryResponseContract(generateData, { minimumBodyCharacters: 1500, maximumBodyCharacters: 2000 });
-
-        expect(generateData.thinking).toEqual({ type: 'enabled' });
-        expect(generateData.include_reasoning).toBe(true);
-        expect(generateData.reasoning_effort).toBe('auto');
-        expect(generateData.messages.at(-1).content).toContain('terminal output instruction');
-    });
-
-    test('response contract requires the story to begin directly with content', () => {
-        const contract = formatResponseContract({ minimumBodyCharacters: 1500, maximumBodyCharacters: 2000 });
-        expect(contract).toContain('第一个非空白输出必须是 <content>');
-        expect(contract).not.toContain('果农');
-        expect(contract).toContain('1500–2000');
-        expect(contract).toContain('1850–1950');
-        expect(contract).toContain('3 个连续的剧情推进单元');
-        expect(contract).toContain('617–650');
-        expect(contract).toContain('标签、<meow_FM> 摘要和 <branches> 分支均不计入');
-    });
 });

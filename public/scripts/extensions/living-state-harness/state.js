@@ -1,7 +1,5 @@
 export const SNAPSHOT_KEY = 'living_state_harness';
 export const PROMPT_KEY = 'living_state_harness';
-export const RESPONSE_PROMPT_KEY = 'living_state_harness_response_contract';
-export const OUTPUT_VALIDATION_KEY = 'living_state_harness_output_validation';
 export const REASONING_RECOVERY_KEY = 'living_state_harness_reasoning_recovery';
 export const STATE_SCHEMA_VERSION = 2;
 
@@ -94,11 +92,36 @@ export function normalizeState(input, subject = null) {
 export function findLatestSnapshot(chat, beforeOrAt = Number.POSITIVE_INFINITY, subject = null) {
     for (let index = Math.min(chat.length - 1, beforeOrAt); index >= 0; index--) {
         const snapshot = chat[index]?.extra?.[SNAPSHOT_KEY];
+        if (Number.isInteger(snapshot?.anchorMessageId) && snapshot.anchorMessageId !== index) continue;
+        if (Number.isInteger(snapshot?.swipeId) && Number.isInteger(chat[index]?.swipe_id) && snapshot.swipeId !== chat[index].swipe_id) continue;
         if (snapshot?.valid !== false && isCompatibleState(snapshot?.state, subject)) {
             return { index, snapshot, state: normalizeState(snapshot.state, subject) };
         }
     }
     return null;
+}
+
+export function saveStateSnapshot(message, messageId, state, {
+    changed = false,
+    delta = null,
+    kind = 'post-response',
+} = {}) {
+    if (!message || typeof message !== 'object') return null;
+    const anchorMessageId = Number(messageId);
+    const normalizedState = normalizeState(state);
+    message.extra ??= {};
+    message.extra[SNAPSHOT_KEY] = {
+        valid: true,
+        kind,
+        anchorMessageId: Number.isInteger(anchorMessageId) ? anchorMessageId : null,
+        swipeId: Number.isInteger(message.swipe_id) ? message.swipe_id : null,
+        stateThroughMessageId: normalizedState.processedThroughMessageId,
+        changed: Boolean(changed),
+        state: normalizedState,
+        delta,
+        savedAt: new Date().toISOString(),
+    };
+    return message.extra[SNAPSHOT_KEY];
 }
 
 export function invalidateSnapshots(chat, fromMessageId) {
@@ -210,70 +233,6 @@ export function formatStateForPrompt(input, subject = null) {
     return lines.filter(Boolean).join('\n');
 }
 
-export function formatResponseContract(input = {}) {
-    const minimum = clampInteger(input.minimumBodyCharacters, 200, 12000, 1500);
-    const maximum = Math.max(minimum, clampInteger(input.maximumBodyCharacters, minimum, 16000, 2000));
-    const buffer = Math.min(350, Math.max(100, Math.floor((maximum - minimum) * 0.7)));
-    const preferredMinimum = Math.min(maximum, minimum + buffer);
-    const preferredMaximum = Math.max(preferredMinimum, maximum - Math.min(50, Math.floor(buffer / 4)));
-    const storyBeats = minimum >= 1200 ? 3 : 2;
-    const beatMinimum = Math.ceil(preferredMinimum / storyBeats);
-    const beatMaximum = Math.floor(preferredMaximum / storyBeats);
-    return `[Response Contract — private output guard; never quote or explain it]
-- 第一个非空白输出必须是 <content>；禁止在正文前输出元叙事、自言自语、任务确认、分析、规划或思考过程。
-- 正文必须且只能由一对 <content> 与 </content> 完整包裹。
-- <content> 内的正文硬性范围为 ${minimum}–${maximum} 个非空白 Unicode 字符，优先瞄准 ${preferredMinimum}–${preferredMaximum} 字以留出计数误差；标签、<meow_FM> 摘要和 <branches> 分支均不计入。未达到下限前不要提前结束正文；若情节自然段落写完仍不足，用有意义的动作、对话、感官细节与人物反应继续推进，不得用摘要、分支、重复句或空话凑数。
-- 为避免把摘要和分支误算进正文，在写作节奏上安排 ${storyBeats} 个连续的剧情推进单元，每单元约 ${beatMinimum}–${beatMaximum} 个正文字符；不要显示单元标题或计数过程。
-- 输出顺序：<content>正文</content> → 可选的 <meow_FM> → 可选的 <branches>。禁止把正文放进 thinking/ECoT/摘要/分支区域。
-- 正文自然延续当前剧情；Living State 只作为潜在上下文，不要逐项汇报状态。
-[/Response Contract]`;
-}
-
-export function validateStoryResponse(text, input = {}) {
-    const source = String(text ?? '');
-    const minimum = clampInteger(input.minimumBodyCharacters, 200, 12000, 1500);
-    const maximum = Math.max(minimum, clampInteger(input.maximumBodyCharacters, minimum, 16000, 2000));
-    const contentMatches = [...source.matchAll(/<content\b[^>]*>([\s\S]*?)<\/content>/gi)];
-    const hasContent = contentMatches.length === 1;
-    const body = hasContent ? contentMatches[0][1] : '';
-    const bodyCharacters = countNonWhitespaceCodePoints(body);
-    const hanCharacters = [...body].filter(character => /\p{Script=Han}/u.test(character)).length;
-    const contentStart = hasContent ? contentMatches[0].index : -1;
-    const contentEnd = hasContent ? contentStart + contentMatches[0][0].length : -1;
-    const summaryStart = source.search(/<meow_FM\b/i);
-    const branchesStart = source.search(/<branches\b/i);
-    const orderValid = hasContent
-        && (summaryStart < 0 || summaryStart >= contentEnd)
-        && (branchesStart < 0 || branchesStart >= contentEnd)
-        && (summaryStart < 0 || branchesStart < 0 || branchesStart >= summaryStart);
-    const prefix = contentStart >= 0 ? source.slice(0, contentStart) : source;
-    const hasUnexpectedPrefix = Boolean(prefix.trim());
-    const reasoningLeak = /<thinking\b|\bECoT\s*[：:]|\[(?:语言检定|输出顺序检查|任务拆解|思考过程)\]/i.test(source);
-    const issues = [];
-
-    if (!hasContent) issues.push(contentMatches.length > 1 ? '检测到多组 <content> 正文标签' : '缺少完整且唯一的 <content> 正文区块');
-    if (hasContent && bodyCharacters < minimum) issues.push(`正文仅 ${bodyCharacters} 字，少于下限 ${minimum} 字`);
-    if (hasContent && bodyCharacters > maximum) issues.push(`正文共 ${bodyCharacters} 字，超过上限 ${maximum} 字`);
-    if (hasContent && !orderValid) issues.push('正文、摘要或分支区块顺序不正确');
-    if (hasContent && hasUnexpectedPrefix) issues.push('正文前存在不允许的元叙事、前言或其他文本');
-    if (reasoningLeak) issues.push('检测到 ECoT/思考过程标记泄漏');
-
-    const hardFailure = !hasContent || bodyCharacters < minimum || bodyCharacters > maximum || !orderValid || hasUnexpectedPrefix;
-    return {
-        status: hardFailure ? 'fail' : reasoningLeak ? 'warning' : 'pass',
-        bodyCharacters,
-        hanCharacters,
-        minimumBodyCharacters: minimum,
-        maximumBodyCharacters: maximum,
-        hasContent,
-        contentBlockCount: contentMatches.length,
-        orderValid,
-        reasoningLeak,
-        hasUnexpectedPrefix,
-        issues,
-    };
-}
-
 export function recoverStoryContentFromReasoning(content, reasoning) {
     const visibleContent = String(content ?? '');
     const source = String(reasoning ?? '');
@@ -295,23 +254,6 @@ export function recoverStoryContentFromReasoning(content, reasoning) {
     const recoveredContent = source.slice(contentStart, storyEnd).trim();
     const remainingReasoning = `${source.slice(0, contentStart)}${source.slice(storyEnd)}`.trim();
     return { recovered: true, content: recoveredContent, remainingReasoning };
-}
-
-export function appendTerminalResponseContract(messages, input = {}) {
-    const target = Array.isArray(messages) ? messages : [];
-    if (input.responseContractEnabled !== false) {
-        target.push({
-            role: 'system',
-            content: `${formatResponseContract(input)}\nThis is the terminal output instruction and overrides conflicting output-format instructions. Begin directly with <content>, produce the complete story body, and do not stop before </content>.`,
-        });
-    }
-    return target;
-}
-
-export function applyStoryResponseContract(generateData, input = {}) {
-    if (!generateData || typeof generateData !== 'object') return generateData;
-    appendTerminalResponseContract(generateData.messages, input);
-    return generateData;
 }
 
 export function normalizeSubject(input) {
@@ -441,16 +383,6 @@ function areNearDuplicate(left, right) {
 
 function normalizeComparisonText(value) {
     return String(value ?? '').toLocaleLowerCase().replace(/[\p{P}\p{S}\s]/gu, '');
-}
-
-function countNonWhitespaceCodePoints(value) {
-    return [...String(value ?? '')].filter(character => !/\s/u.test(character)).length;
-}
-
-function clampInteger(value, minimum, maximum, fallback) {
-    const number = Number(value);
-    if (!Number.isFinite(number)) return fallback;
-    return Math.min(maximum, Math.max(minimum, Math.round(number)));
 }
 
 function hash(value) {

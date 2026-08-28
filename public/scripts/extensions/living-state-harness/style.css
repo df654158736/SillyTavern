@@ -194,44 +194,6 @@ body:has(#lsh_panel.open) #rightNavHolder {
     font-style: italic;
 }
 
-.lsh-output-heading {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 1rem;
-}
-
-.lsh-output-heading .lsh-section-title {
-    margin-bottom: 0;
-}
-
-.lsh-output-heading strong {
-    color: var(--lsh-accent);
-    font-size: 0.84rem;
-}
-
-.lsh-output-card[data-state="fail"] {
-    border-color: #a95d59;
-}
-
-.lsh-output-card[data-state="fail"] .lsh-output-heading strong,
-.lsh-output-card[data-state="warning"] .lsh-output-heading strong {
-    color: #f0bd68;
-}
-
-.lsh-output-length {
-    margin-top: 0.7rem;
-    color: var(--lsh-text);
-    font-weight: 700;
-}
-
-.lsh-output-issues {
-    margin-top: 0.35rem;
-    color: var(--lsh-muted-text);
-    font-size: 0.8rem;
-    line-height: 1.45;
-}
-
 .lsh-debug-card summary {
     cursor: pointer;
     color: var(--lsh-text);
