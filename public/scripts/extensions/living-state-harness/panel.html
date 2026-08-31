@@ -39,6 +39,25 @@
             <div class="lsh-section-title">剧情连续性</div>
             <div id="lsh_continuity_lists" class="lsh-list-stack"></div>
         </section>
+        <section class="lsh-card">
+            <div class="lsh-section-title">长期对话</div>
+            <div class="lsh-card-note">完整保留当前聊天，将较早正文整理为历史记忆，并用最近原文和当前 Harness 状态创建续聊。</div>
+            <div id="lsh_archive_status" class="lsh-archive-status">正在统计当前对话……</div>
+            <button id="lsh_archive_continue" class="menu_button menu_button_icon">
+                <i class="fa-solid fa-box-archive"></i>
+                <span>归档长对话并继续</span>
+            </button>
+            <div id="lsh_archive_actions" class="flex-container lsh-archive-actions">
+                <button id="lsh_view_archive" class="menu_button menu_button_icon">
+                    <i class="fa-solid fa-file-lines"></i>
+                    <span>查看摘要</span>
+                </button>
+                <button id="lsh_edit_archive" class="menu_button menu_button_icon">
+                    <i class="fa-solid fa-pen-to-square"></i>
+                    <span>修改摘要</span>
+                </button>
+            </div>
+        </section>
         <details class="lsh-debug-card">
             <summary>更新详情</summary>
             <div id="lsh_metrics" class="lsh-metrics"></div>

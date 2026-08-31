@@ -3,6 +3,7 @@ import { describe, expect, test } from '@jest/globals';
 import {
     PROMPT_BUDGET_CHARACTERS,
     SNAPSHOT_KEY,
+    areCompatibleCharacterNames,
     collectMessages,
     createEmptyState,
     findLatestSnapshot,
@@ -10,10 +11,17 @@ import {
     invalidateSnapshots,
     mergeDelta,
     normalizeState,
+    normalizeDeltaReferences,
     recoverStoryContentFromReasoning,
     saveStateSnapshot,
     sanitizeEvidenceText,
 } from '../public/scripts/extensions/living-state-harness/state.js';
+import {
+    createContinuationChat,
+    formatArchiveForPrompt,
+    normalizeArchive,
+    splitHistoryForArchive,
+} from '../public/scripts/extensions/living-state-harness/archive.js';
 
 describe('Living State Harness state ledger', () => {
     const subject = { role: 'character', name: '小雅', counterpartName: 'D' };
@@ -220,6 +228,60 @@ describe('Living State Harness state ledger', () => {
         expect(findLatestSnapshot(chat, Number.POSITIVE_INFINITY, subject)?.index).toBe(0);
     });
 
+    test('continues the higher-version imported state after a bracketed character rename', () => {
+        const importedSubject = { role: 'character', name: '小雅', counterpartName: 'D' };
+        const activeSubject = { role: 'character', name: '小雅（小姨）', counterpartName: 'D' };
+        const importedState = createEmptyState(importedSubject);
+        importedState.version = 18;
+        importedState.processedThroughMessageId = 36;
+        importedState.character.currentMood = '延续的旧状态';
+        const restartedState = createEmptyState(activeSubject);
+        restartedState.version = 1;
+        restartedState.processedThroughMessageId = 38;
+
+        const chat = Array.from({ length: 39 }, () => ({ is_user: false, mes: '' }));
+        saveStateSnapshot(chat[36], 36, importedState);
+        saveStateSnapshot(chat[38], 38, restartedState);
+
+        const restored = findLatestSnapshot(chat, Number.POSITIVE_INFINITY, activeSubject);
+
+        expect(areCompatibleCharacterNames('小雅', '小雅（小姨）')).toBe(true);
+        expect(restored?.index).toBe(36);
+        expect(restored?.state.version).toBe(18);
+        expect(restored?.state.subject.name).toBe('小雅（小姨）');
+        expect(restored?.state.character.currentMood).toBe('延续的旧状态');
+    });
+
+    test('does not import state from a genuinely different character', () => {
+        const unrelatedState = createEmptyState({ role: 'character', name: '林雪', counterpartName: 'D' });
+        unrelatedState.version = 20;
+        const currentState = createEmptyState(subject);
+        currentState.version = 1;
+        const chat = [{}, {}];
+        saveStateSnapshot(chat[0], 0, unrelatedState);
+        saveStateSnapshot(chat[1], 1, currentState);
+
+        expect(areCompatibleCharacterNames('林雪', '小雅（小姨）')).toBe(false);
+        expect(findLatestSnapshot(chat, Number.POSITIVE_INFINITY, subject)?.index).toBe(1);
+    });
+
+    test('normalizes object-shaped close references returned by the updater', () => {
+        const delta = {
+            continuityChanges: {
+                openPromiseIdsClose: [{ id: 'promise-one', reason: 'done' }, 'promise-two'],
+                openThreadIdsClose: [{ id: 'thread-one' }, { broken: true }],
+                importantFactIdsRemove: [],
+            },
+            offscreenLifeChanges: { upcomingObligationIdsClose: [{ id: 'obligation-one' }] },
+        };
+
+        normalizeDeltaReferences(delta);
+
+        expect(delta.continuityChanges.openPromiseIdsClose).toEqual(['promise-one', 'promise-two']);
+        expect(delta.continuityChanges.openThreadIdsClose).toEqual(['thread-one']);
+        expect(delta.offscreenLifeChanges.upcomingObligationIdsClose).toEqual(['obligation-one']);
+    });
+
     test('rolls a deleted assistant reply back to the surviving pre-generation checkpoint', () => {
         const stateBeforeReply = createEmptyState(subject);
         stateBeforeReply.version = 3;
@@ -329,4 +391,83 @@ describe('Living State Harness state ledger', () => {
         expect(recoverStoryContentFromReasoning('已有正文', '<content>另一份正文</content>').recovered).toBe(false);
     });
 
+});
+
+describe('Living State Harness long-chat archive', () => {
+    const archiveSubject = { role: 'character', name: '小雅（小姨）', counterpartName: 'D' };
+
+    test('splits only older messages and keeps the requested recent raw window', () => {
+        const chat = Array.from({ length: 35 }, (_, index) => ({
+            is_user: index % 2 === 0,
+            name: index % 2 === 0 ? 'D' : '小雅',
+            mes: `消息 ${index}`,
+        }));
+
+        const split = splitHistoryForArchive(chat, 20, 300);
+
+        expect(split.boundary).toBe(15);
+        expect(split.archived).toHaveLength(15);
+        expect(split.recent).toHaveLength(20);
+        expect(split.recent[0]).toBe(chat[15]);
+        expect(split.chunks.flat()).toHaveLength(15);
+        expect(split.chunks.flat()[14].id).toBe(14);
+    });
+
+    test('normalizes duplicate archive entries and formats history separately from current state', () => {
+        const archive = normalizeArchive({
+            overview: '共同经历已经改变双方关系。',
+            chronology: ['[消息 4] 一起看书。', '[消息 4] 一起看书。'],
+            relationshipHistory: ['[消息 8] 小雅开始信任D。'],
+            durableFacts: ['[消息 9] D知道书店地址。'],
+        }, archiveSubject);
+
+        const prompt = formatArchiveForPrompt(archive, archiveSubject);
+
+        expect(archive.chronology).toEqual(['[消息 4] 一起看书。']);
+        expect(prompt).toContain('accepted past story facts, not current state');
+        expect(prompt).toContain('关系演变及原因');
+        expect(prompt).not.toContain('当前情绪');
+    });
+
+    test('keeps foundational and newest history when a repeated archive exceeds its capacity', () => {
+        const chronology = Array.from({ length: 90 }, (_, index) => `[消息 ${index}] 事件 ${index}`);
+        const commitments = Array.from({ length: 45 }, (_, index) => `[消息 ${index}] 承诺 ${index}`);
+
+        const archive = normalizeArchive({ overview: '长期剧情', chronology, commitments }, archiveSubject);
+
+        expect(archive.chronology).toHaveLength(80);
+        expect(archive.chronology[0]).toContain('事件 0');
+        expect(archive.chronology[11]).toContain('事件 11');
+        expect(archive.chronology[12]).toContain('事件 22');
+        expect(archive.chronology.at(-1)).toContain('事件 89');
+        expect(archive.commitments).toHaveLength(40);
+        expect(archive.commitments[0]).toContain('承诺 5');
+        expect(archive.commitments.at(-1)).toContain('承诺 44');
+    });
+
+    test('creates an independent continuation and re-anchors exactly one current snapshot', () => {
+        const originalState = createEmptyState(archiveSubject);
+        originalState.version = 12;
+        originalState.processedThroughMessageId = 99;
+        originalState.relationship.trust = '已经建立信任';
+        const recent = Array.from({ length: 4 }, (_, index) => ({
+            is_user: index % 2 === 0,
+            mes: `最近消息 ${index}`,
+            extra: {
+                [SNAPSHOT_KEY]: { stale: true },
+                living_state_harness_calibration_backup: { stale: true },
+            },
+        }));
+
+        const continuation = createContinuationChat(recent, originalState, archiveSubject);
+
+        expect(continuation).not.toBe(recent);
+        expect(continuation[0]).not.toBe(recent[0]);
+        expect(recent[0].extra[SNAPSHOT_KEY]).toEqual({ stale: true });
+        expect(continuation[0].extra[SNAPSHOT_KEY]).toBeUndefined();
+        expect(continuation[3].extra[SNAPSHOT_KEY].anchorMessageId).toBe(3);
+        expect(continuation[3].extra[SNAPSHOT_KEY].state.processedThroughMessageId).toBe(3);
+        expect(continuation[3].extra[SNAPSHOT_KEY].state.version).toBe(12);
+        expect(continuation[3].extra.living_state_harness_calibration_backup).toBeUndefined();
+    });
 });

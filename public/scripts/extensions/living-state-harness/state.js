@@ -1,6 +1,7 @@
 export const SNAPSHOT_KEY = 'living_state_harness';
 export const PROMPT_KEY = 'living_state_harness';
 export const REASONING_RECOVERY_KEY = 'living_state_harness_reasoning_recovery';
+export const CALIBRATION_BACKUP_KEY = 'living_state_harness_calibration_backup';
 export const STATE_SCHEMA_VERSION = 2;
 export const PROMPT_BUDGET_CHARACTERS = 3200;
 
@@ -103,15 +104,25 @@ export function normalizeState(input, subject = null) {
 }
 
 export function findLatestSnapshot(chat, beforeOrAt = Number.POSITIVE_INFINITY, subject = null) {
+    let bestMatch = null;
     for (let index = Math.min(chat.length - 1, beforeOrAt); index >= 0; index--) {
         const snapshot = chat[index]?.extra?.[SNAPSHOT_KEY];
         if (Number.isInteger(snapshot?.anchorMessageId) && snapshot.anchorMessageId !== index) continue;
         if (Number.isInteger(snapshot?.swipeId) && Number.isInteger(chat[index]?.swipe_id) && snapshot.swipeId !== chat[index].swipe_id) continue;
         if (snapshot?.valid !== false && isCompatibleState(snapshot?.state, subject)) {
-            return { index, snapshot, state: normalizeState(snapshot.state, subject) };
+            const candidate = { index, snapshot, state: normalizeState(snapshot.state, subject) };
+            if (!bestMatch || compareSnapshotCandidates(candidate, bestMatch) > 0) bestMatch = candidate;
         }
     }
-    return null;
+    return bestMatch;
+}
+
+function compareSnapshotCandidates(left, right) {
+    const versionDifference = Number(left.state?.version ?? 0) - Number(right.state?.version ?? 0);
+    if (versionDifference) return versionDifference;
+    const progressDifference = Number(left.state?.processedThroughMessageId ?? -1) - Number(right.state?.processedThroughMessageId ?? -1);
+    if (progressDifference) return progressDifference;
+    return left.index - right.index;
 }
 
 export function saveStateSnapshot(message, messageId, state, {
@@ -210,6 +221,29 @@ export function mergeDelta(previousState, delta, evidenceIds, throughMessageId, 
     return { state, changed };
 }
 
+export function normalizeDeltaReferences(delta) {
+    if (!delta || typeof delta !== 'object' || Array.isArray(delta)) return delta;
+    for (const [containerKey, fieldNames] of Object.entries({
+        relationshipChanges: ['evolvedPreferenceIdsRemove'],
+        offscreenLifeChanges: ['recentEventIdsRemove', 'upcomingObligationIdsClose', 'peopleOnMindIdsRemove'],
+        continuityChanges: ['importantFactIdsRemove', 'openPromiseIdsClose', 'openThreadIdsClose'],
+    })) {
+        const container = delta[containerKey];
+        if (!container || typeof container !== 'object') continue;
+        for (const fieldName of fieldNames) container[fieldName] = normalizeReferenceIds(container[fieldName]);
+    }
+    delta.turningPointIdsRemove = normalizeReferenceIds(delta.turningPointIdsRemove);
+    return delta;
+}
+
+function normalizeReferenceIds(value) {
+    const ids = (Array.isArray(value) ? value : [])
+        .map(item => typeof item === 'string' || typeof item === 'number' ? String(item) : String(item?.id ?? ''))
+        .map(item => item.trim())
+        .filter(Boolean);
+    return [...new Set(ids)];
+}
+
 export function formatStateForPrompt(input, subject = null, guidance = {}) {
     const state = normalizeState(input, subject);
     const characterName = state.subject.name || 'the active character';
@@ -300,7 +334,26 @@ function isCompatibleState(state, expectedSubject) {
     if (!actual.name) return false;
     if (!expectedSubject) return true;
     const expected = normalizeSubject(expectedSubject);
-    return !expected.name || actual.name === expected.name;
+    return !expected.name || areCompatibleCharacterNames(actual.name, expected.name);
+}
+
+/**
+ * Treat an imported state as belonging to the active card when the only name
+ * difference is a bracketed qualifier, for example "Alice" and
+ * "Alice (mother)". Deliberately avoid fuzzy matching unrelated names.
+ */
+export function areCompatibleCharacterNames(left, right) {
+    const actual = canonicalCharacterName(left);
+    const expected = canonicalCharacterName(right);
+    return Boolean(actual && expected && actual === expected);
+}
+
+function canonicalCharacterName(value) {
+    return cleanString(value)
+        .normalize('NFKC')
+        .replace(/\([^()]*\)|（[^（）]*）|\[[^\[\]]*\]|【[^【】]*】/g, '')
+        .replace(/[\s\p{P}\p{S}]+/gu, '')
+        .toLocaleLowerCase();
 }
 
 export function assertDeltaSubject(delta, expectedSubject) {

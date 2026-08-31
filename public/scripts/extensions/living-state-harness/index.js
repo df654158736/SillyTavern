@@ -1,11 +1,16 @@
 import {
     characters,
+    chat_metadata,
     eventSource,
     event_types,
     extension_prompt_roles,
     extension_prompt_types,
     generateRaw,
     getCharacterCardFields,
+    getCurrentChatId,
+    getRequestHeaders,
+    openCharacterChat,
+    saveChat,
     saveSettingsDebounced,
     setExtensionPrompt,
     syncMesToSwipe,
@@ -18,6 +23,7 @@ import { removeReasoningFromString } from '../../reasoning.js';
 import { selected_group } from '../../group-chats.js';
 import { Popup } from '../../popup.js';
 import {
+    CALIBRATION_BACKUP_KEY,
     PROMPT_KEY,
     REASONING_RECOVERY_KEY,
     SIGNAL_DEFINITIONS,
@@ -30,10 +36,21 @@ import {
     invalidateSnapshots,
     mergeDelta,
     normalizeGuidance,
+    normalizeDeltaReferences,
     normalizeState,
     recoverStoryContentFromReasoning,
     saveStateSnapshot,
 } from './state.js';
+import {
+    ARCHIVE_METADATA_KEY,
+    ARCHIVE_PROMPT_KEY,
+    buildArchiveUpdatePayload,
+    createContinuationChat,
+    createEmptyArchive,
+    formatArchiveForPrompt,
+    normalizeArchive,
+    splitHistoryForArchive,
+} from './archive.js';
 
 const MODULE_NAME = 'livingStateHarness';
 const LEGACY_RESPONSE_PROMPT_KEY = 'living_state_harness_response_contract';
@@ -42,6 +59,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     frozen: false,
     depth: 2,
     updaterModel: 'deepseek-v4-flash',
+    archiveModel: 'deepseek-v4-pro',
     responseTokens: 8192,
     messageWindow: 20,
     recoverStoryFromReasoning: true,
@@ -54,6 +72,7 @@ const DEFAULT_SETTINGS = Object.freeze({
         '角色不能使用尚未在剧情中获知的秘密',
         '世界客观规律和已发生的聊天事实优先于 Living State',
     ].join('\n'),
+    archiveKeepRecent: 20,
 });
 
 let lastRuntime = {
@@ -70,6 +89,9 @@ let backgroundUpdateRunning = false;
 let backgroundStartedAt = 0;
 let historyRevision = 0;
 let pendingStateUpdate = null;
+let calibrationRunning = false;
+let archiveRunning = false;
+let lastArchiveRuntime = { status: 'idle', detail: '', completedChunks: 0, totalChunks: 0 };
 let ecotRenderQueued = false;
 
 function enhanceEcotBlocks(root = document) {
@@ -261,13 +283,22 @@ async function injectPrompts(state) {
     const settings = getSettings();
     const statePrompt = state ? formatStateForPrompt(state, null, settings) : '';
     setExtensionPrompt(PROMPT_KEY, statePrompt, extension_prompt_types.IN_CHAT, settings.depth, false, extension_prompt_roles.SYSTEM);
+    const archivePrompt = formatStoredArchivePrompt();
+    setExtensionPrompt(ARCHIVE_PROMPT_KEY, archivePrompt, extension_prompt_types.IN_CHAT, Math.max(settings.depth + 2, 4), false, extension_prompt_roles.SYSTEM);
     setExtensionPrompt(LEGACY_RESPONSE_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
     lastRuntime.injectionTokens = await safeTokenCount(statePrompt);
 }
 
 function clearInjection() {
     setExtensionPrompt(PROMPT_KEY, '', extension_prompt_types.IN_CHAT, getSettings().depth, false, extension_prompt_roles.SYSTEM);
+    setExtensionPrompt(ARCHIVE_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, Math.max(getSettings().depth + 2, 4), false, extension_prompt_roles.SYSTEM);
     setExtensionPrompt(LEGACY_RESPONSE_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+}
+
+function formatStoredArchivePrompt() {
+    const stored = chat_metadata?.[ARCHIVE_METADATA_KEY];
+    if (!stored?.memory) return '';
+    return formatArchiveForPrompt(stored.memory, getSubjectIdentity());
 }
 
 async function recoverReceivedResponse(messageId, type) {
@@ -370,6 +401,7 @@ function parseDelta(rawResult, subject) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         throw new Error('Updater returned an invalid Delta object.');
     }
+    normalizeDeltaReferences(value);
     assertDeltaSubject(value, subject);
     assertEvidenceBackedAdditions(value);
     assertEvidenceBackedSignals(value);
@@ -548,6 +580,448 @@ async function confirmResetState() {
     if (confirmed) await resetState();
 }
 
+async function calibrateCurrentState() {
+    if (calibrationRunning || backgroundUpdateRunning) {
+        toastr.warning('状态更新正在进行，请稍后再校准。', 'Living State Harness');
+        return;
+    }
+    const context = getContext();
+    const chat = context.chat;
+    const subject = getSubjectIdentity(context);
+    const latest = Array.isArray(chat) ? findLatestSnapshot(chat, Number.POSITIVE_INFINITY, subject) : null;
+    if (!latest || !chat.length) {
+        toastr.warning('当前聊天还没有可校准的状态。', 'Living State Harness');
+        return;
+    }
+    const approved = await Popup.show.confirm('校准当前角色状态？', '将检查整个聊天中的开放承诺、待办和线索，只清理已完成、失效或重复的项目。校准前状态会保留，可随时撤销。本操作会调用一次状态更新模型。');
+    if (!approved) return;
+
+    const revision = historyRevision;
+    const anchorMessage = chat[latest.index];
+    calibrationRunning = true;
+    $('#lsh_calibrate').prop('disabled', true);
+    toastr.info('正在校准状态，请稍候……', 'Living State Harness');
+    try {
+        const evidence = compactCalibrationEvidence(collectMessages(chat, -1, chat.length - 1, chat.length));
+        const delta = await runCalibration(latest.state, evidence, getSettings().updaterModel, subject);
+        restrictCalibrationDelta(delta);
+        const evidenceIds = evidence.map(message => message.id);
+        const { state, changed } = mergeDelta(latest.state, delta, evidenceIds, chat.length - 1, subject);
+        if (!changed) {
+            toastr.info('没有发现可以安全清理的过期项目。', 'Living State Harness');
+            return;
+        }
+        const summary = describeCalibrationChanges(latest.state, state);
+        const confirmed = await Popup.show.confirm('应用校准结果？', summary);
+        if (!confirmed) return;
+        if (revision !== historyRevision || getContext().chat !== chat || chat[latest.index] !== anchorMessage) {
+            throw new Error('校准期间聊天发生了变化，请重新运行校准。');
+        }
+        anchorMessage.extra ??= {};
+        anchorMessage.extra[CALIBRATION_BACKUP_KEY] = structuredClone(anchorMessage.extra[SNAPSHOT_KEY]);
+        saveSnapshot(anchorMessage, latest.index, state, { source: 'calibration', changes: summary }, true, 'calibration');
+        await context.saveChat();
+        await injectPrompts(state);
+        lastRuntime = { ...lastRuntime, status: 'calibrated', error: '', delta, updatedAt: new Date().toISOString() };
+        updateUi();
+        toastr.success(`状态已校准到版本 ${state.version}。`, 'Living State Harness');
+    } catch (error) {
+        console.error('Living State Harness calibration failed', error);
+        toastr.error(error instanceof Error ? error.message : String(error), '状态校准失败');
+    } finally {
+        calibrationRunning = false;
+        $('#lsh_calibrate').prop('disabled', false);
+    }
+}
+
+async function undoLastCalibration() {
+    const context = getContext();
+    const chat = context.chat;
+    if (!Array.isArray(chat)) return;
+    for (let index = chat.length - 1; index >= 0; index--) {
+        const backup = chat[index]?.extra?.[CALIBRATION_BACKUP_KEY];
+        if (!backup) continue;
+        const confirmed = await Popup.show.confirm('撤销上次状态校准？', `将恢复校准前的状态版本 ${backup.state?.version ?? '未知'}。`);
+        if (!confirmed) return;
+        chat[index].extra[SNAPSHOT_KEY] = structuredClone(backup);
+        delete chat[index].extra[CALIBRATION_BACKUP_KEY];
+        await context.saveChat();
+        await restoreInjection();
+        updateUi();
+        toastr.success('已恢复校准前状态。', 'Living State Harness');
+        return;
+    }
+    toastr.info('当前聊天没有可撤销的校准。', 'Living State Harness');
+}
+
+async function runCalibration(state, messages, model, subject) {
+    const prompt = JSON.stringify({
+        task: 'Audit the existing Living State against the accepted chat evidence. Return removals/closures only; never add new state.',
+        targetSubject: subject,
+        currentState: state,
+        acceptedMessages: messages,
+    });
+    const result = await generateRaw({
+        prompt: [{ role: 'user', content: `${prompt}\n\nReturn one JSON object only with this exact shape:\n${JSON.stringify(createEmptyDelta(subject))}` }],
+        systemPrompt: `你是角色状态校准器，只清理已有状态，不写故事、不新增事实。逐项检查当前开放的待办、承诺和线索；只有聊天证据明确证明已完成、取消、失效或重复时才关闭。无法确定的一律保留。重要事实和转折点是历史记录，除非完全重复、被明确否定或明显不属于该角色，否则保留。关闭或移除项只返回现有 id 字符串。立即输出 JSON，不要解释。`,
+        responseLength: 8192,
+        trimNames: false,
+        model: String(model || '').trim() || null,
+        thinking: 'disabled',
+        skipChatCompletionSettings: true,
+        ignoreGenerationStop: true,
+    });
+    return parseDelta(result, subject);
+}
+
+function restrictCalibrationDelta(delta) {
+    delta.sceneChanges = { location: null, presentCharacters: null, immediateSituation: null };
+    delta.characterChanges = Object.fromEntries(Object.keys(delta.characterChanges ?? {}).map(key => [key, null]));
+    delta.agencyChanges = Object.fromEntries(Object.keys(delta.agencyChanges ?? {}).map(key => [key, null]));
+    for (const key of ['trust', 'emotionalCloseness', 'authorityDynamic', 'currentTension']) if (delta.relationshipChanges) delta.relationshipChanges[key] = null;
+    if (delta.relationshipChanges) delta.relationshipChanges.evolvedPreferencesAdd = [];
+    delta.signalChanges = Object.fromEntries(Object.keys(SIGNAL_DEFINITIONS).map(key => [key, null]));
+    if (delta.offscreenLifeChanges) {
+        delta.offscreenLifeChanges.recentEventsAdd = [];
+        delta.offscreenLifeChanges.upcomingObligationsAdd = [];
+        delta.offscreenLifeChanges.peopleOnMindAdd = [];
+    }
+    if (delta.continuityChanges) {
+        delta.continuityChanges.importantFactsAdd = [];
+        delta.continuityChanges.openPromisesAdd = [];
+        delta.continuityChanges.openThreadsAdd = [];
+    }
+    delta.turningPointsAdd = [];
+}
+
+function compactCalibrationEvidence(messages, totalCharacters = 90000, perMessageCharacters = 1200) {
+    const result = [];
+    let remaining = totalCharacters;
+    for (const message of messages) {
+        if (remaining <= 0) break;
+        const allowance = Math.min(perMessageCharacters, remaining);
+        const content = String(message.content ?? '');
+        result.push({ ...message, content: content.length > allowance ? `${content.slice(0, allowance)}…` : content });
+        remaining -= Math.min(content.length, allowance);
+    }
+    return result;
+}
+
+function describeCalibrationChanges(before, after) {
+    const groups = [
+        ['待办', before.offscreenLife.upcomingObligations, after.offscreenLife.upcomingObligations],
+        ['承诺', before.continuity.openPromises, after.continuity.openPromises],
+        ['线索', before.continuity.openThreads, after.continuity.openThreads],
+        ['重要事实', before.continuity.importantFacts, after.continuity.importantFacts],
+        ['转折点', before.recentTurningPoints, after.recentTurningPoints],
+    ];
+    const lines = [];
+    for (const [label, oldItems, newItems] of groups) {
+        const kept = new Set(newItems.map(item => item.id));
+        for (const item of oldItems) if (!kept.has(item.id)) lines.push(`关闭/归档${label}：${item.text}`);
+    }
+    return lines.length ? lines.join('\n') : '状态内容发生了规范化调整。';
+}
+
+async function archiveAndContinue() {
+    if (archiveRunning || calibrationRunning || backgroundUpdateRunning) {
+        toastr.warning('状态任务正在运行，请稍后再归档。', 'Living State Harness');
+        return;
+    }
+    if (selected_group) {
+        toastr.warning('长期对话归档暂不支持群聊。', 'Living State Harness');
+        return;
+    }
+    const context = getContext();
+    const sourceChat = context.chat;
+    const subject = getSubjectIdentity(context);
+    const latest = Array.isArray(sourceChat) ? findLatestSnapshot(sourceChat, Number.POSITIVE_INFINITY, subject) : null;
+    const settings = getSettings();
+    const split = Array.isArray(sourceChat) ? splitHistoryForArchive(sourceChat, settings.archiveKeepRecent) : null;
+    if (!latest || !split || split.archived.length < 10 || split.recent.length < 4) {
+        toastr.info('当前聊天还不需要归档，或尚未建立可续接的角色状态。', 'Living State Harness');
+        return;
+    }
+
+    const storedTokens = sourceChat.reduce((sum, message) => sum + (Number(message?.extra?.token_count) || 0), 0);
+    const approved = await Popup.show.confirm(
+        '归档长对话并继续？',
+        `原聊天将完整保留。将归档较早的 ${split.archived.length} 条消息，保留最近 ${split.recent.length} 条原文，并重新核对 Harness 中的过期项目。${storedTokens ? `当前正文累计约 ${storedTokens.toLocaleString()} Token。` : ''}`,
+        { okButton: '生成预览', cancelButton: '取消' },
+    );
+    if (!approved) return;
+
+    archiveRunning = true;
+    lastArchiveRuntime = { status: 'starting', detail: '正在保存原聊天……', completedChunks: 0, totalChunks: split.chunks.length };
+    const revision = historyRevision;
+    const sourceChatId = getCurrentChatId();
+    $('#lsh_archive_continue').prop('disabled', true);
+    updateUi();
+    toastr.info(`正在整理 ${split.chunks.length} 个历史片段，原聊天不会被修改……`, 'Living State Harness');
+    try {
+        await context.saveChat();
+        let memory = chat_metadata?.[ARCHIVE_METADATA_KEY]?.memory
+            ? normalizeArchive(chat_metadata[ARCHIVE_METADATA_KEY].memory, subject)
+            : createEmptyArchive(subject);
+        for (let index = 0; index < split.chunks.length; index++) {
+            lastArchiveRuntime = { status: 'summarizing', detail: `正在整理历史片段 ${index + 1}/${split.chunks.length}`, completedChunks: index, totalChunks: split.chunks.length };
+            updateUi();
+            memory = await runArchiveUpdate(memory, split.chunks[index], subject, settings.archiveModel);
+            lastArchiveRuntime = { status: 'summarizing', detail: `历史片段已完成 ${index + 1}/${split.chunks.length}`, completedChunks: index + 1, totalChunks: split.chunks.length };
+            $('#lsh_archive_status').text(`正在整理历史：${index + 1}/${split.chunks.length}`);
+        }
+        assertUsefulArchive(memory);
+
+        const archivedRawText = split.chunks.flat().map(message => `${message.role}: ${message.content}`).join('\n');
+        const recentRawText = split.recent.map(message => String(message.mes ?? '')).join('\n');
+        const archivedRawTokens = await safeTokenCount(archivedRawText);
+        const recentRawTokens = await safeTokenCount(recentRawText);
+        const summaryTokens = await safeTokenCount(formatArchiveForPrompt(memory, subject));
+        const compactedTokens = Number.isFinite(recentRawTokens) && Number.isFinite(summaryTokens) ? recentRawTokens + summaryTokens : null;
+        const estimatedSavedTokens = Number.isFinite(archivedRawTokens) && Number.isFinite(summaryTokens) ? Math.max(0, archivedRawTokens - summaryTokens) : null;
+        const savingRate = Number.isFinite(estimatedSavedTokens) && archivedRawTokens > 0 ? Math.round(estimatedSavedTokens / archivedRawTokens * 100) : null;
+        const metricsText = [
+            Number.isFinite(archivedRawTokens) ? `较早正文：${archivedRawTokens.toLocaleString()} Token` : '',
+            Number.isFinite(summaryTokens) ? `历史摘要：${summaryTokens.toLocaleString()} Token` : '',
+            Number.isFinite(recentRawTokens) ? `保留原文：${recentRawTokens.toLocaleString()} Token` : '',
+            Number.isFinite(compactedTokens) ? `续聊历史部分：约 ${compactedTokens.toLocaleString()} Token` : '',
+            Number.isFinite(savingRate) ? `较早正文压缩率：${savingRate}%` : '',
+        ].filter(Boolean).join('；');
+
+        const edited = await Popup.show.input(
+            '检查历史记忆',
+            `${metricsText}<br>下面内容只负责“过去发生过什么”，不负责当前情绪、位置和计划。你可以直接修改；取消不会创建新聊天。`,
+            JSON.stringify(memory, null, 2),
+            { rows: 24, wide: true, large: true, okButton: '确认并创建续聊', cancelButton: '取消' },
+        );
+        if (edited === null) {
+            lastArchiveRuntime = { status: 'cancelled', detail: '已取消：没有创建续聊，原聊天保持不变。', completedChunks: split.chunks.length, totalChunks: split.chunks.length };
+            return;
+        }
+        memory = normalizeArchive(JSON.parse(edited), subject);
+        assertUsefulArchive(memory);
+
+        const calibrationEvidence = [
+            { id: split.boundary - 1, role: 'system', name: '历史记忆', content: formatArchiveForPrompt(memory, subject) },
+            ...compactCalibrationEvidence(collectMessages(sourceChat, split.boundary - 1, sourceChat.length - 1, split.recent.length), 36000, 2400),
+        ];
+        const cleanupDelta = await runCalibration(latest.state, calibrationEvidence, settings.archiveModel, subject);
+        restrictCalibrationDelta(cleanupDelta);
+        const { state: calibratedState } = mergeDelta(
+            latest.state,
+            cleanupDelta,
+            calibrationEvidence.map(message => message.id),
+            sourceChat.length - 1,
+            subject,
+        );
+        const continuation = createContinuationChat(split.recent, calibratedState, subject);
+        if (revision !== historyRevision || getContext().chat !== sourceChat || getCurrentChatId() !== sourceChatId) {
+            throw new Error('整理期间聊天发生了变化。为保护原记录，没有创建续聊，请重新操作。');
+        }
+
+        const timestamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+        const continuationName = `${subject.name} - 续聊-${timestamp}`;
+        const finalSummaryTokens = await safeTokenCount(formatArchiveForPrompt(memory, subject));
+        const archiveMetadata = {
+            schemaVersion: 1,
+            sourceChatId,
+            sourceMessageCount: sourceChat.length,
+            archivedThroughMessageId: split.boundary - 1,
+            keptRecentMessages: split.recent.length,
+            createdAt: new Date().toISOString(),
+            metrics: {
+                originalMessageCount: sourceChat.length,
+                archivedMessageCount: split.archived.length,
+                recentMessageCount: split.recent.length,
+                archivedRawTokens,
+                summaryTokens: finalSummaryTokens,
+                recentRawTokens,
+                compactedTokens: Number.isFinite(recentRawTokens) && Number.isFinite(finalSummaryTokens) ? recentRawTokens + finalSummaryTokens : null,
+            },
+            memory,
+        };
+        const continuationMetadata = {
+            ...structuredClone(chat_metadata),
+            integrity: crypto.randomUUID(),
+            [ARCHIVE_METADATA_KEY]: archiveMetadata,
+        };
+        await saveChat({
+            chatName: continuationName,
+            withMetadata: continuationMetadata,
+            chatData: continuation,
+        });
+        await verifySavedContinuation(continuationName, sourceChatId);
+        await openCharacterChat(continuationName);
+        lastArchiveRuntime = { status: 'success', detail: `已创建续聊：${continuationName}`, completedChunks: split.chunks.length, totalChunks: split.chunks.length };
+        toastr.success(`续聊已创建：保留 ${split.recent.length} 条原文，原聊天仍完整保存。`, 'Living State Harness');
+    } catch (error) {
+        console.error('Living State Harness archive failed', error);
+        const detail = error instanceof Error ? error.message : String(error);
+        lastArchiveRuntime = { ...lastArchiveRuntime, status: 'error', detail: `归档失败：${detail}` };
+        toastr.error(detail, '归档失败 · 原聊天未修改');
+    } finally {
+        archiveRunning = false;
+        $('#lsh_archive_continue').prop('disabled', false);
+        updateUi();
+    }
+}
+
+async function verifySavedContinuation(chatName, sourceChatId) {
+    const character = characters[this_chid];
+    const response = await fetch('/api/chats/get', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        cache: 'no-cache',
+        body: JSON.stringify({
+            ch_name: character.name,
+            file_name: chatName,
+            avatar_url: character.avatar,
+        }),
+    });
+    if (!response.ok) throw new Error(`续聊保存验证失败（HTTP ${response.status}）。`);
+    const saved = await response.json();
+    const metadata = Array.isArray(saved) ? saved[0]?.chat_metadata?.[ARCHIVE_METADATA_KEY] : null;
+    if (!metadata || metadata.sourceChatId !== sourceChatId) {
+        throw new Error('SillyTavern 未能读回刚保存的续聊；已停止切换，原聊天保持不变。');
+    }
+}
+
+async function viewStoredArchive() {
+    const archive = chat_metadata?.[ARCHIVE_METADATA_KEY];
+    if (!archive?.memory) {
+        toastr.info('当前聊天没有历史摘要。', 'Living State Harness');
+        return;
+    }
+    await Popup.show.text('历史摘要明细', renderArchiveDetailsHtml(archive), { wide: true, large: true });
+}
+
+async function editStoredArchive() {
+    const archive = chat_metadata?.[ARCHIVE_METADATA_KEY];
+    if (!archive?.memory) {
+        toastr.info('当前聊天没有历史摘要。', 'Living State Harness');
+        return;
+    }
+    try {
+        const edited = await Popup.show.input(
+            '修改历史摘要',
+            `${formatArchiveMetrics(archive.metrics)}<br>只修改已经发生的历史；当前状态请使用 Harness 状态编辑或校准。`,
+            JSON.stringify(archive.memory, null, 2),
+            { rows: 24, wide: true, large: true, okButton: '保存并立即生效', cancelButton: '取消' },
+        );
+        if (edited === null) return;
+        const memory = normalizeArchive(JSON.parse(edited), getSubjectIdentity());
+        assertUsefulArchive(memory);
+        archive.memory = memory;
+        archive.updatedAt = new Date().toISOString();
+        archive.metrics ??= {};
+        archive.metrics.summaryTokens = await safeTokenCount(formatArchiveForPrompt(memory, getSubjectIdentity()));
+        archive.metrics.compactedTokens = Number.isFinite(archive.metrics.recentRawTokens)
+            ? archive.metrics.recentRawTokens + (archive.metrics.summaryTokens ?? 0)
+            : null;
+        await getContext().saveChat();
+        await restoreInjection();
+        updateUi();
+        toastr.success('历史摘要已保存并立即生效。', 'Living State Harness');
+    } catch (error) {
+        toastr.error(error instanceof Error ? error.message : String(error), '历史摘要保存失败');
+    }
+}
+
+function formatArchiveMetrics(metrics) {
+    if (!metrics) return '';
+    const before = Number.isFinite(metrics.archivedRawTokens) ? metrics.archivedRawTokens : null;
+    const summary = Number.isFinite(metrics.summaryTokens) ? metrics.summaryTokens : null;
+    const recent = Number.isFinite(metrics.recentRawTokens) ? metrics.recentRawTokens : null;
+    const compacted = Number.isFinite(metrics.compactedTokens) ? metrics.compactedTokens : null;
+    const rate = Number.isFinite(before) && before > 0 && Number.isFinite(summary) ? Math.max(0, Math.round((before - summary) / before * 100)) : null;
+    return [
+        Number.isFinite(before) ? `较早正文 ${before.toLocaleString()} Token` : '',
+        Number.isFinite(summary) ? `压缩摘要 ${summary.toLocaleString()} Token` : '',
+        Number.isFinite(recent) ? `最近原文 ${recent.toLocaleString()} Token` : '',
+        Number.isFinite(compacted) ? `续聊历史部分约 ${compacted.toLocaleString()} Token` : '',
+        Number.isFinite(rate) ? `较早正文减少 ${rate}%` : '',
+    ].filter(Boolean).join(' · ');
+}
+
+function escapeArchiveHtml(value) {
+    return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+}
+
+function renderArchiveDetailsHtml(archiveRecord) {
+    const memory = normalizeArchive(archiveRecord.memory, getSubjectIdentity());
+    const metrics = archiveRecord.metrics ?? {};
+    const metricItems = [
+        ['较早正文', metrics.archivedRawTokens, 'Token'],
+        ['压缩摘要', metrics.summaryTokens, 'Token'],
+        ['最近原文', metrics.recentRawTokens, 'Token'],
+        ['续聊历史', metrics.compactedTokens, 'Token'],
+    ];
+    const rate = Number.isFinite(metrics.archivedRawTokens) && metrics.archivedRawTokens > 0 && Number.isFinite(metrics.summaryTokens)
+        ? Math.max(0, Math.round((metrics.archivedRawTokens - metrics.summaryTokens) / metrics.archivedRawTokens * 100))
+        : null;
+    const sections = [
+        ['总体脉络', memory.overview ? [memory.overview] : []],
+        ['关系演变及原因', memory.relationshipHistory],
+        ['仍有效的承诺与约定', memory.commitments],
+        ['尚未解决的线索', memory.openThreads],
+        ['已确认且持续有效的事实', memory.durableFacts],
+        ['重要人物、地点与物品', memory.importantPeoplePlacesItems],
+        ['时间线与长期影响', memory.chronology],
+        ['具有持续意义的原话', memory.meaningfulQuotes],
+    ];
+    const metricHtml = metricItems
+        .filter(([, value]) => Number.isFinite(value))
+        .map(([label, value, unit]) => `<div class="lsh-archive-metric"><span>${label}</span><strong>${Number(value).toLocaleString()} ${unit}</strong></div>`)
+        .join('');
+    const rateHtml = Number.isFinite(rate) ? `<div class="lsh-archive-rate"><strong>${rate}%</strong><span>较早正文压缩率</span></div>` : '';
+    const sectionHtml = sections
+        .filter(([, items]) => items.length)
+        .map(([title, items]) => `<section class="lsh-archive-detail-section"><h4>${escapeArchiveHtml(title)} <span>${items.length}</span></h4>${title === '总体脉络'
+            ? `<p>${escapeArchiveHtml(items[0])}</p>`
+            : `<ul>${items.map(item => `<li>${escapeArchiveHtml(item)}</li>`).join('')}</ul>`}</section>`)
+        .join('');
+    return `<div class="lsh-archive-view"><div class="lsh-archive-summary-head"><div class="lsh-archive-metric-grid">${metricHtml}</div>${rateHtml}</div><div class="lsh-archive-detail-grid">${sectionHtml}</div></div>`;
+}
+
+async function runArchiveUpdate(previousArchive, messages, subject, model) {
+    const payload = buildArchiveUpdatePayload(previousArchive, messages, subject);
+    const shape = createEmptyArchive(subject);
+    let lastError;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+            const result = await generateRaw({
+                prompt: [{ role: 'user', content: `${JSON.stringify(payload)}\n\nReturn the complete JSON archive with this exact shape:\n${JSON.stringify(shape)}` }],
+                systemPrompt: '你是长期剧情档案整理器，只整理已被接受的聊天事实，不写故事。维护一份可持续更新的历史记忆：保留关系演变的原因、承诺、秘密、伏笔和长期后果；删除已经失效的临时状态与重复项。不得推断用户未明确表达的内心。每个事实条目前缀必须包含最有力的来源消息编号，如[消息 12]。只输出一个 JSON 对象。',
+                responseLength: 8192,
+                trimNames: false,
+                model: String(model || '').trim() || null,
+                thinking: 'disabled',
+                skipChatCompletionSettings: true,
+                ignoreGenerationStop: true,
+            });
+            const parsed = typeof result === 'string' ? JSON.parse(extractJsonObject(removeReasoningFromString(result))) : result;
+            const archive = normalizeArchive(parsed, subject);
+            assertUsefulArchive(archive);
+            return archive;
+        } catch (error) {
+            lastError = error;
+            console.warn(`Living State Harness archive attempt ${attempt} failed`, error);
+        }
+    }
+    throw lastError;
+}
+
+function assertUsefulArchive(archive) {
+    const factCount = ['chronology', 'relationshipHistory', 'durableFacts', 'commitments', 'openThreads', 'importantPeoplePlacesItems']
+        .reduce((sum, key) => sum + (archive[key]?.length ?? 0), 0);
+    if (!archive.overview || factCount < 3) throw new Error('历史记忆内容不足，已停止创建续聊。');
+}
+
 async function saveManualState() {
     const context = getContext();
     const message = [...(context.chat ?? [])].reverse().find(item => item.is_user);
@@ -593,6 +1067,10 @@ function bindSettings() {
         settings.updaterModel = String($(this).val()).trim();
         saveSettingsDebounced();
     });
+    $('#lsh_archive_model').val(settings.archiveModel).on('change', function () {
+        settings.archiveModel = String($(this).val()).trim();
+        saveSettingsDebounced();
+    });
     $('#lsh_response_tokens').val(settings.responseTokens).on('change', function () {
         settings.responseTokens = clamp(Number($(this).val()), 8192, 16384);
         $(this).val(settings.responseTokens);
@@ -602,6 +1080,12 @@ function bindSettings() {
         settings.messageWindow = clamp(Number($(this).val()), 2, 50);
         $(this).val(settings.messageWindow);
         saveSettingsDebounced();
+    });
+    $('#lsh_archive_keep_recent').val(settings.archiveKeepRecent).on('change', function () {
+        settings.archiveKeepRecent = clamp(Number($(this).val()), 10, 50);
+        $(this).val(settings.archiveKeepRecent);
+        saveSettingsDebounced();
+        updateUi();
     });
     for (const [selector, key] of [
         ['#lsh_state_influence', 'stateInfluence'],
@@ -629,8 +1113,13 @@ function bindSettings() {
     $('#lsh_open_panel, #lsh_panel_toggle').on('click', () => togglePanel(true));
     $('#lsh_close_panel').on('click', () => togglePanel(false));
     $('#lsh_rebuild').on('click', confirmResetState);
+    $('#lsh_calibrate').on('click', calibrateCurrentState);
+    $('#lsh_undo_calibration').on('click', undoLastCalibration);
     $('#lsh_reset_state').on('click', confirmResetState);
     $('#lsh_save_state').on('click', saveManualState);
+    $('#lsh_archive_continue').on('click', archiveAndContinue);
+    $('#lsh_view_archive').on('click', viewStoredArchive);
+    $('#lsh_edit_archive').on('click', editStoredArchive);
 }
 
 function togglePanel(open) {
@@ -647,6 +1136,8 @@ function updateUi() {
     const characterName = subject.name || '未选择角色';
     const counterpartName = subject.counterpartName || '用户';
     const status = getStatusPresentation(settings, latest);
+    const messageCount = Array.isArray(context.chat) ? context.chat.length : 0;
+    const storedTokens = Array.isArray(context.chat) ? context.chat.reduce((sum, message) => sum + (Number(message?.extra?.token_count) || 0), 0) : 0;
 
     $('#lsh_character_name').text(characterName);
     $('#lsh_now_title').text(`${characterName} · 此刻状态`);
@@ -698,6 +1189,17 @@ function updateUi() {
         .append(metric('注入状态', formatTokens(lastRuntime.injectionTokens)))
         .append(metric('耗时', lastRuntime.durationMs ? `${lastRuntime.durationMs} 毫秒` : '—'));
     $('#lsh_delta_preview').text(lastRuntime.error || JSON.stringify(lastRuntime.delta, null, 2) || '暂无更新记录。');
+    const archive = chat_metadata?.[ARCHIVE_METADATA_KEY];
+    const archiveText = archive
+        ? [`已承接 ${archive.sourceMessageCount} 条消息`, formatArchiveMetrics(archive.metrics)].filter(Boolean).join('<br>')
+        : [
+            [`当前 ${messageCount} 条消息`, storedTokens ? `正文累计约 ${storedTokens.toLocaleString()} Token` : ''].filter(Boolean).join(' · '),
+            ['error', 'cancelled'].includes(lastArchiveRuntime.status) ? lastArchiveRuntime.detail : '',
+        ].filter(Boolean).join('<br>');
+    const runningDetail = lastArchiveRuntime.detail || '正在生成历史记忆，请勿切换聊天……';
+    $('#lsh_archive_status')[archiveRunning ? 'text' : 'html'](archiveRunning ? runningDetail : archiveText);
+    $('#lsh_archive_continue').prop('disabled', archiveRunning || !latest || messageCount < settings.archiveKeepRecent + 10);
+    $('#lsh_archive_actions').toggle(Boolean(archive?.memory));
     if (!$('#lsh_raw_state').is(':focus')) $('#lsh_raw_state').val(JSON.stringify(state, null, 2));
 }
 

@@ -28,10 +28,19 @@
                 <option value="deepseek-v4-pro">deepseek-v4-pro — 推理较慢</option>
                 <option value="">使用当前正文模型</option>
             </select>
+            <label for="lsh_archive_model">长对话归档模型（独立设置）</label>
+            <select id="lsh_archive_model" class="text_pole">
+                <option value="deepseek-v4-pro">deepseek-v4-pro — 推荐，细节保留更好</option>
+                <option value="deepseek-v4-flash">deepseek-v4-flash — 更快，但长剧情容易遗漏</option>
+                <option value="">使用当前正文模型</option>
+            </select>
             <label for="lsh_response_tokens">更新器最大输出 Token</label>
             <input id="lsh_response_tokens" class="text_pole" type="number" min="8192" max="16384" step="1024">
             <label for="lsh_message_window">每次最多分析的新消息数</label>
             <input id="lsh_message_window" class="text_pole" type="number" min="2" max="50" step="1">
+            <label for="lsh_archive_keep_recent">归档续聊保留的最近原文数</label>
+            <input id="lsh_archive_keep_recent" class="text_pole" type="number" min="10" max="50" step="1">
+            <small class="lsh-muted">默认保留最近 20 条原始消息；更高更稳但节省的 Token 较少。原聊天始终完整保留。</small>
             <hr>
             <h4>创作导向</h4>
             <label for="lsh_state_influence">角色状态对正文的影响</label>
@@ -74,6 +83,14 @@
                 <button id="lsh_rebuild" class="menu_button menu_button_icon" title="清除快照，并在下一轮重新建立">
                     <i class="fa-solid fa-rotate"></i>
                     <span>下一轮重新建立</span>
+                </button>
+                <button id="lsh_calibrate" class="menu_button menu_button_icon" title="检查并清理已完成、失效或重复的状态项目">
+                    <i class="fa-solid fa-broom"></i>
+                    <span>校准当前状态</span>
+                </button>
+                <button id="lsh_undo_calibration" class="menu_button menu_button_icon" title="恢复校准前保留的状态快照">
+                    <i class="fa-solid fa-rotate-left"></i>
+                    <span>撤销上次校准</span>
                 </button>
             </div>
             <small class="lsh-muted">仅追踪当前 char 的内在状态、自主性与剧情连续性；不注入正文格式或字数硬约束，创作档位只作为软导向，也不修改原生 thinking/reasoning 设置。若完整正文误入 reasoning，只恢复正文并保留其余思考。</small>
