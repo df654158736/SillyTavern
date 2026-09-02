@@ -3331,10 +3331,10 @@ function getUserAvatarUrl() {
  * @param {number} generationType - The requested generation mode.
  * @returns {Promise<string>} - A promise that resolves when the prompt generation completes.
  */
-async function generatePrompt(quietPrompt, generationType) {
+async function generatePrompt(quietPrompt, generationType, sceneText = null) {
     const toast = toastr.info('Generating image prompt with an LLM...', 'Image Generation');
     let reply = generationType === generationMode.KREA_SCENE
-        ? await generateKreaScenePrompt(quietPrompt)
+        ? await generateKreaScenePrompt(quietPrompt, sceneText)
         : await generateQuietPrompt({ quietPrompt });
     const processedReply = processReply(reply);
     toastr.clear(toast);
@@ -3347,7 +3347,7 @@ async function generatePrompt(quietPrompt, generationType) {
     return processedReply;
 }
 
-async function generateKreaScenePrompt(instruction) {
+async function generateKreaScenePrompt(instruction, sceneText = null) {
     const profileId = extension_settings.sd.krea_prompt_profile;
     if (!profileId) {
         return await generateQuietPrompt({ quietPrompt: instruction });
@@ -3355,13 +3355,15 @@ async function generateKreaScenePrompt(instruction) {
 
     const context = getContext();
     const character = context.characters?.[context.characterId];
-    const currentMessage = (context.chat || []).filter(message => {
-        const hasImage = Array.isArray(message.extra?.media) && message.extra.media.some(media => media?.type === 'image');
-        return !message.is_system && !hasImage;
-    }).slice(-1).map(message => ({
-        role: message.is_user ? 'user' : 'assistant',
-        content: String(message.mes || '').slice(0, 6000),
-    }));
+    const currentMessage = sceneText === null
+        ? (context.chat || []).filter(message => {
+            const hasImage = Array.isArray(message.extra?.media) && message.extra.media.some(media => media?.type === 'image');
+            return !message.is_system && !hasImage;
+        }).slice(-1).map(message => ({
+            role: message.is_user ? 'user' : 'assistant',
+            content: String(message.mes || '').slice(0, 6000),
+        }))
+        : [{ role: 'user', content: String(sceneText).slice(0, 12000) }];
     const sharedAppearance = character?.data?.extensions?.sd_character_prompt?.positive;
     const characterAppearance = String(sharedAppearance || character?.data?.description || character?.description || '').slice(0, 2500);
     const messages = [
@@ -5288,7 +5290,7 @@ async function sdMessageButton($icon, { animate } = {}) {
     /** @type {MediaAttachment} */
     const selectedMedia = message.extra.media.length > 0
         ? (message.extra.media[message.extra.media_index] ?? message.extra.media[message.extra.media.length - 1])
-        : { url: '', title: message.mes, type: MEDIA_TYPE.IMAGE, generation_type: generationMode.FREE };
+        : { url: '', title: message.mes, type: MEDIA_TYPE.IMAGE, generation_type: generationMode.KREA_SCENE, needs_prompt_generation: true };
 
     if (animate && message.extra.media.length > 0) {
         const index = message.extra.media.indexOf(selectedMedia);
@@ -5376,7 +5378,32 @@ async function generateMediaSwipe(mediaAttachment, message, onStart, onComplete,
             negative: savedNegative,
             resolution: mediaAttachment.width && mediaAttachment.height ? `${mediaAttachment.width}x${mediaAttachment.height}` : null,
         };
-        const prompt = await refinePrompt(savedPrompt, refineArgs);
+        let prompt;
+        if (mediaAttachment.needs_prompt_generation) {
+            const selectedScene = await Popup.show.input(
+                '截取要转换成图片的场景',
+                '下方是这条消息的正文。请删除不需要进入画面的段落；确认后将生成 Krea2 提示词。',
+                savedPrompt.trim(),
+                {
+                    rows: 18,
+                    wide: true,
+                    large: true,
+                    okButton: '确定并生成提示词',
+                    cancelButton: '取消',
+                },
+            );
+            if (!selectedScene?.trim()) {
+                if (selectedScene !== null) {
+                    toastr.warning('请至少保留一段用于生成场景的文字。', 'Image Generation');
+                }
+                return null;
+            }
+            const quietPrompt = getQuietPrompt(generationMode.KREA_SCENE, 'krea');
+            prompt = await generatePrompt(quietPrompt, generationMode.KREA_SCENE, selectedScene.trim());
+            prompt = await refinePrompt(prompt, { force: true, kreaScene: true });
+        } else {
+            prompt = await refinePrompt(savedPrompt, refineArgs);
+        }
         dimensions = setTypeSpecificDimensions(generationType, refineArgs.resolution ? mediaAttachment : null);
 
         const context = getContext();
