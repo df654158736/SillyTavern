@@ -20,6 +20,7 @@ import {
     createContinuationChat,
     formatArchiveForPrompt,
     normalizeArchive,
+    parseRepairableJsonObject,
     splitHistoryForArchive,
 } from '../public/scripts/extensions/living-state-harness/archive.js';
 
@@ -443,6 +444,23 @@ describe('Living State Harness long-chat archive', () => {
         expect(archive.commitments).toHaveLength(40);
         expect(archive.commitments[0]).toContain('承诺 5');
         expect(archive.commitments.at(-1)).toContain('承诺 44');
+    });
+
+    test('repairs harmless missing commas, trailing commas, and literal newlines in archive JSON', () => {
+        const damaged = `\`\`\`json
+{
+  "overview": "第一行
+第二行"
+  "chronology": ["事件一",],
+  "durableFacts": []
+}
+\`\`\``;
+
+        expect(parseRepairableJsonObject(damaged)).toEqual({
+            overview: '第一行\n第二行',
+            chronology: ['事件一'],
+            durableFacts: [],
+        });
     });
 
     test('creates an independent continuation and re-anchors exactly one current snapshot', () => {

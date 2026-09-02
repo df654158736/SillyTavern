@@ -2422,14 +2422,20 @@ router.post('/generate', async function (request, response) {
             mergeObjectWithYaml(headers, request.body.custom_include_headers);
             embedOpenRouterMedia(request.body.messages, { audio: true, video: false });
             if (request.body.json_schema) {
-                bodyParams['response_format'] = {
-                    type: 'json_schema',
-                    json_schema: {
-                        name: request.body.json_schema.name,
-                        strict: request.body.json_schema.strict ?? true,
-                        schema: request.body.json_schema.value,
-                    },
-                };
+                // DeepSeek's OpenAI-compatible API supports JSON Object mode, but
+                // not every deployment accepts OpenAI's json_schema response type.
+                if (/^https:\/\/api\.deepseek\.com(?:\/|$)/i.test(String(apiUrl))) {
+                    setJsonObjectFormat(bodyParams, request.body.messages, request.body.json_schema);
+                } else {
+                    bodyParams['response_format'] = {
+                        type: 'json_schema',
+                        json_schema: {
+                            name: request.body.json_schema.name,
+                            strict: request.body.json_schema.strict ?? true,
+                            schema: request.body.json_schema.value,
+                        },
+                    };
+                }
             }
         } else if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.PERPLEXITY) {
             apiUrl = API_PERPLEXITY;

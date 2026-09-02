@@ -1,6 +1,7 @@
 import { SNAPSHOT_KEY, normalizeState, sanitizeEvidenceText, saveStateSnapshot } from './state.js';
 
 export const ARCHIVE_METADATA_KEY = 'living_state_harness_archive';
+export const ARCHIVE_RUNTIME_METADATA_KEY = 'living_state_harness_archive_runtime';
 export const ARCHIVE_PROMPT_KEY = 'living_state_harness_archive';
 export const ARCHIVE_SCHEMA_VERSION = 1;
 
@@ -39,6 +40,51 @@ export function normalizeArchive(input, subject = {}) {
         importantPeoplePlacesItems: cleanBalancedList(source.importantPeoplePlacesItems, 50, 10),
         meaningfulQuotes: cleanBalancedList(source.meaningfulQuotes, 30, 6),
     };
+}
+
+export function parseRepairableJsonObject(value) {
+    const text = String(value ?? '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start === -1 || end < start) throw new SyntaxError('Archive updater did not return a JSON object.');
+    const json = text.slice(start, end + 1);
+    try {
+        return JSON.parse(json);
+    } catch (originalError) {
+        try {
+            return JSON.parse(repairCommonJsonDamage(json));
+        } catch {
+            throw originalError;
+        }
+    }
+}
+
+function repairCommonJsonDamage(value) {
+    let result = escapeLiteralNewlinesInsideStrings(value);
+    result = result.replace(/("(?:\\.|[^"\\])*"|true|false|null|-?\d+(?:\.\d+)?|\]|\})\s*(\r?\n\s*"[^"\r\n]+"\s*:)/g, '$1,$2');
+    return result.replace(/,\s*([}\]])/g, '$1');
+}
+
+function escapeLiteralNewlinesInsideStrings(value) {
+    let result = '';
+    let inString = false;
+    let escaped = false;
+    for (const character of value) {
+        if (inString && (character === '\n' || character === '\r')) {
+            result += character === '\n' ? '\\n' : '\\r';
+            escaped = false;
+            continue;
+        }
+        result += character;
+        if (escaped) {
+            escaped = false;
+        } else if (character === '\\' && inString) {
+            escaped = true;
+        } else if (character === '"') {
+            inString = !inString;
+        }
+    }
+    return result;
 }
 
 function cleanText(value, maximum) {
@@ -140,7 +186,7 @@ export function formatArchiveForPrompt(input, subject = {}) {
         if (!items.length) continue;
         lines.push(`\n${title}:`, ...items.map(item => `- ${item}`));
     }
-    return lines.join('\n').slice(0, 18000);
+    return lines.join('\n').slice(0, 30000);
 }
 
 export function createContinuationChat(recentMessages, state, subject) {

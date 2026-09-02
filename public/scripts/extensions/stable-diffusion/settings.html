@@ -14,6 +14,11 @@
                 <input id="sd_refine_mode" type="checkbox" />
                 <span data-i18n="sd_refine_mode_txt">Edit prompts before generation</span>
             </label>
+            <label for="sd_krea_prompt_profile">Krea2 提示词模型连接</label>
+            <select id="sd_krea_prompt_profile" class="text_pole">
+                <option value="">当前主聊天模型</option>
+            </select>
+            <small>仅用于“Krea2 当前场景”的提示词整理，不会切换主聊天连接。</small>
             <label for="sd_function_tool" class="checkbox_label" data-i18n="[title]sd_function_tool" title="Use the function tool to automatically detect intents to generate images.">
                 <input id="sd_function_tool" type="checkbox" />
                 <span data-i18n="sd_function_tool_txt">Use function tool</span>

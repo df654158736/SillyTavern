@@ -44,11 +44,13 @@ import {
 import {
     ARCHIVE_METADATA_KEY,
     ARCHIVE_PROMPT_KEY,
+    ARCHIVE_RUNTIME_METADATA_KEY,
     buildArchiveUpdatePayload,
     createContinuationChat,
     createEmptyArchive,
     formatArchiveForPrompt,
     normalizeArchive,
+    parseRepairableJsonObject,
     splitHistoryForArchive,
 } from './archive.js';
 
@@ -759,15 +761,33 @@ async function archiveAndContinue() {
     updateUi();
     toastr.info(`正在整理 ${split.chunks.length} 个历史片段，原聊天不会被修改……`, 'Living State Harness');
     try {
-        await context.saveChat();
-        let memory = chat_metadata?.[ARCHIVE_METADATA_KEY]?.memory
-            ? normalizeArchive(chat_metadata[ARCHIVE_METADATA_KEY].memory, subject)
-            : createEmptyArchive(subject);
-        for (let index = 0; index < split.chunks.length; index++) {
+        const checkpoint = chat_metadata?.[ARCHIVE_RUNTIME_METADATA_KEY];
+        const canResume = checkpoint?.partialMemory
+            && checkpoint.sourceMessageCount === sourceChat.length
+            && checkpoint.boundary === split.boundary
+            && Number(checkpoint.completedChunks) > 0
+            && Number(checkpoint.completedChunks) < split.chunks.length;
+        let memory = canResume
+            ? normalizeArchive(checkpoint.partialMemory, subject)
+            : chat_metadata?.[ARCHIVE_METADATA_KEY]?.memory
+                ? normalizeArchive(chat_metadata[ARCHIVE_METADATA_KEY].memory, subject)
+                : createEmptyArchive(subject);
+        const startChunk = canResume ? Number(checkpoint.completedChunks) : 0;
+        for (let index = startChunk; index < split.chunks.length; index++) {
             lastArchiveRuntime = { status: 'summarizing', detail: `正在整理历史片段 ${index + 1}/${split.chunks.length}`, completedChunks: index, totalChunks: split.chunks.length };
             updateUi();
             memory = await runArchiveUpdate(memory, split.chunks[index], subject, settings.archiveModel);
-            lastArchiveRuntime = { status: 'summarizing', detail: `历史片段已完成 ${index + 1}/${split.chunks.length}`, completedChunks: index + 1, totalChunks: split.chunks.length };
+            lastArchiveRuntime = {
+                status: 'summarizing',
+                detail: `历史片段已完成 ${index + 1}/${split.chunks.length}`,
+                completedChunks: index + 1,
+                totalChunks: split.chunks.length,
+                partialMemory: memory,
+                sourceMessageCount: sourceChat.length,
+                boundary: split.boundary,
+            };
+            chat_metadata[ARCHIVE_RUNTIME_METADATA_KEY] = structuredClone(lastArchiveRuntime);
+            await context.saveChat();
             $('#lsh_archive_status').text(`正在整理历史：${index + 1}/${split.chunks.length}`);
         }
         assertUsefulArchive(memory);
@@ -856,13 +876,40 @@ async function archiveAndContinue() {
         toastr.success(`续聊已创建：保留 ${split.recent.length} 条原文，原聊天仍完整保存。`, 'Living State Harness');
     } catch (error) {
         console.error('Living State Harness archive failed', error);
-        const detail = error instanceof Error ? error.message : String(error);
+        const detail = formatArchiveError(error);
         lastArchiveRuntime = { ...lastArchiveRuntime, status: 'error', detail: `归档失败：${detail}` };
+        if (getContext().chat === sourceChat && getCurrentChatId() === sourceChatId) {
+            chat_metadata[ARCHIVE_RUNTIME_METADATA_KEY] = {
+                ...(chat_metadata[ARCHIVE_RUNTIME_METADATA_KEY] ?? {}),
+                status: 'error',
+                detail,
+                completedChunks: lastArchiveRuntime.completedChunks,
+                totalChunks: lastArchiveRuntime.totalChunks,
+                model: settings.archiveModel || 'current',
+                failedAt: new Date().toISOString(),
+                responsePreview: String(error?.archiveResponsePreview ?? '').slice(0, 2400),
+            };
+            try {
+                await context.saveChat();
+            } catch (saveError) {
+                console.error('Failed to persist Living State archive diagnostics', saveError);
+            }
+        }
         toastr.error(detail, '归档失败 · 原聊天未修改');
     } finally {
         archiveRunning = false;
         $('#lsh_archive_continue').prop('disabled', false);
         updateUi();
+    }
+}
+
+function formatArchiveError(error) {
+    if (error instanceof Error) return error.message || error.name;
+    if (typeof error === 'string') return error;
+    try {
+        return JSON.stringify(error);
+    } catch {
+        return String(error);
     }
 }
 
@@ -990,30 +1037,82 @@ function renderArchiveDetailsHtml(archiveRecord) {
 
 async function runArchiveUpdate(previousArchive, messages, subject, model) {
     const payload = buildArchiveUpdatePayload(previousArchive, messages, subject);
-    const shape = createEmptyArchive(subject);
+    const groups = [
+        ['overview', 'relationshipHistory'],
+        ['chronology'],
+        ['durableFacts', 'importantPeoplePlacesItems', 'meaningfulQuotes'],
+        ['commitments', 'openThreads'],
+    ];
+    let archive = normalizeArchive(previousArchive, subject);
+    for (const fields of groups) {
+        const partial = await runArchiveSectionUpdate(payload, archive, fields, model);
+        archive = normalizeArchive({ ...archive, ...partial }, subject);
+    }
+    assertUsefulArchive(archive);
+    return archive;
+}
+
+async function runArchiveSectionUpdate(payload, currentArchive, fields, model) {
+    const shape = Object.fromEntries(fields.map(field => [field, currentArchive[field]]));
     let lastError;
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
             const result = await generateRaw({
-                prompt: [{ role: 'user', content: `${JSON.stringify(payload)}\n\nReturn the complete JSON archive with this exact shape:\n${JSON.stringify(shape)}` }],
-                systemPrompt: '你是长期剧情档案整理器，只整理已被接受的聊天事实，不写故事。维护一份可持续更新的历史记忆：保留关系演变的原因、承诺、秘密、伏笔和长期后果；删除已经失效的临时状态与重复项。不得推断用户未明确表达的内心。每个事实条目前缀必须包含最有力的来源消息编号，如[消息 12]。只输出一个 JSON 对象。',
+                prompt: [{ role: 'user', content: `${JSON.stringify({ ...payload, previousArchive: currentArchive })}\n\n只更新并完整返回以下栏目，其他栏目不要输出：${fields.join(', ')}。精确形状：\n${JSON.stringify(shape)}` }],
+                systemPrompt: '你是长期剧情档案整理器，只整理已被接受的聊天事实，不写故事。更新指定栏目时保留已有的关键细节、因果、关系演变、承诺、秘密、伏笔和长期后果；合并重复表达，但不要为了缩短而删除仍可能影响角色行为的事实。清除已明确失效的临时状态。不得推断用户未明确表达的内心。事实条目保留最有力的来源消息编号，如[消息 12]。只输出指定栏目的 JSON 对象。',
                 responseLength: 8192,
                 trimNames: false,
                 model: String(model || '').trim() || null,
                 thinking: 'disabled',
                 skipChatCompletionSettings: true,
                 ignoreGenerationStop: true,
+                // Prefer provider-enforced JSON. The second attempt deliberately falls
+                // back to prompt-only JSON for OpenAI-compatible relays that reject schemas.
+                jsonSchema: attempt === 1 ? createArchiveSectionJsonSchema(fields) : null,
             });
-            const parsed = typeof result === 'string' ? JSON.parse(extractJsonObject(removeReasoningFromString(result))) : result;
-            const archive = normalizeArchive(parsed, subject);
-            assertUsefulArchive(archive);
-            return archive;
+            let parsed;
+            try {
+                parsed = typeof result === 'string'
+                    ? parseRepairableJsonObject(removeReasoningFromString(result))
+                    : result;
+            } catch (error) {
+                if (error && typeof error === 'object') error.archiveResponsePreview = String(result ?? '').slice(0, 2400);
+                throw error;
+            }
+            if (!parsed || typeof parsed !== 'object' || fields.some(field => !(field in parsed))) {
+                throw new Error(`历史记忆栏目返回不完整：${fields.join(', ')}`);
+            }
+            return Object.fromEntries(fields.map(field => [field, parsed[field]]));
         } catch (error) {
             lastError = error;
             console.warn(`Living State Harness archive attempt ${attempt} failed`, error);
         }
     }
     throw lastError;
+}
+
+function createArchiveSectionJsonSchema(fields) {
+    const stringList = { type: 'array', items: { type: 'string' } };
+    const allProperties = {
+        overview: { type: 'string' },
+        chronology: stringList,
+        relationshipHistory: stringList,
+        durableFacts: stringList,
+        commitments: stringList,
+        openThreads: stringList,
+        importantPeoplePlacesItems: stringList,
+        meaningfulQuotes: stringList,
+    };
+    return {
+        name: `living_state_archive_${fields.join('_')}`,
+        strict: true,
+        value: {
+            type: 'object',
+            additionalProperties: false,
+            required: fields,
+            properties: Object.fromEntries(fields.map(field => [field, allProperties[field]])),
+        },
+    };
 }
 
 function assertUsefulArchive(archive) {
@@ -1190,11 +1289,20 @@ function updateUi() {
         .append(metric('耗时', lastRuntime.durationMs ? `${lastRuntime.durationMs} 毫秒` : '—'));
     $('#lsh_delta_preview').text(lastRuntime.error || JSON.stringify(lastRuntime.delta, null, 2) || '暂无更新记录。');
     const archive = chat_metadata?.[ARCHIVE_METADATA_KEY];
+    const persistedArchiveRuntime = chat_metadata?.[ARCHIVE_RUNTIME_METADATA_KEY];
     const archiveText = archive
-        ? [`已承接 ${archive.sourceMessageCount} 条消息`, formatArchiveMetrics(archive.metrics)].filter(Boolean).join('<br>')
+        ? [
+            `已承接 ${archive.sourceMessageCount} 条消息`,
+            formatArchiveMetrics(archive.metrics),
+            ['error', 'cancelled'].includes(lastArchiveRuntime.status)
+                ? lastArchiveRuntime.detail
+                : persistedArchiveRuntime?.status === 'error' ? `上次归档失败：${persistedArchiveRuntime.detail}` : '',
+        ].filter(Boolean).join('<br>')
         : [
             [`当前 ${messageCount} 条消息`, storedTokens ? `正文累计约 ${storedTokens.toLocaleString()} Token` : ''].filter(Boolean).join(' · '),
-            ['error', 'cancelled'].includes(lastArchiveRuntime.status) ? lastArchiveRuntime.detail : '',
+            ['error', 'cancelled'].includes(lastArchiveRuntime.status)
+                ? lastArchiveRuntime.detail
+                : persistedArchiveRuntime?.status === 'error' ? `上次归档失败：${persistedArchiveRuntime.detail}` : '',
         ].filter(Boolean).join('<br>');
     const runningDetail = lastArchiveRuntime.detail || '正在生成历史记忆，请勿切换聊天……';
     $('#lsh_archive_status')[archiveRunning ? 'text' : 'html'](archiveRunning ? runningDetail : archiveText);
