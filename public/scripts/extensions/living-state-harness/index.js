@@ -49,6 +49,7 @@ import {
     createContinuationChat,
     createEmptyArchive,
     formatArchiveForPrompt,
+    getArchiveResumeCheckpoint,
     normalizeArchive,
     parseRepairableJsonObject,
     splitHistoryForArchive,
@@ -762,17 +763,22 @@ async function archiveAndContinue() {
     toastr.info(`正在整理 ${split.chunks.length} 个历史片段，原聊天不会被修改……`, 'Living State Harness');
     try {
         const checkpoint = chat_metadata?.[ARCHIVE_RUNTIME_METADATA_KEY];
-        const canResume = checkpoint?.partialMemory
-            && checkpoint.sourceMessageCount === sourceChat.length
-            && checkpoint.boundary === split.boundary
-            && Number(checkpoint.completedChunks) > 0
-            && Number(checkpoint.completedChunks) < split.chunks.length;
-        let memory = canResume
-            ? normalizeArchive(checkpoint.partialMemory, subject)
+        const resumeCheckpoint = getArchiveResumeCheckpoint(checkpoint, sourceChat.length, split.boundary, split.chunks.length, subject);
+        let memory = resumeCheckpoint
+            ? resumeCheckpoint.memory
             : chat_metadata?.[ARCHIVE_METADATA_KEY]?.memory
                 ? normalizeArchive(chat_metadata[ARCHIVE_METADATA_KEY].memory, subject)
                 : createEmptyArchive(subject);
-        const startChunk = canResume ? Number(checkpoint.completedChunks) : 0;
+        const startChunk = resumeCheckpoint?.completedChunks ?? 0;
+        if (startChunk === split.chunks.length) {
+            lastArchiveRuntime = {
+                ...checkpoint,
+                status: 'postprocessing',
+                detail: `已恢复全部 ${split.chunks.length} 个历史片段，正在继续后处理……`,
+            };
+            updateUi();
+            toastr.info('已恢复上次完成的历史摘要，不会重复调用模型整理。', 'Living State Harness');
+        }
         for (let index = startChunk; index < split.chunks.length; index++) {
             lastArchiveRuntime = { status: 'summarizing', detail: `正在整理历史片段 ${index + 1}/${split.chunks.length}`, completedChunks: index, totalChunks: split.chunks.length };
             updateUi();
@@ -820,6 +826,19 @@ async function archiveAndContinue() {
         }
         memory = normalizeArchive(JSON.parse(edited), subject);
         assertUsefulArchive(memory);
+
+        lastArchiveRuntime = {
+            status: 'postprocessing',
+            detail: '历史摘要已确认，正在校准当前状态……',
+            completedChunks: split.chunks.length,
+            totalChunks: split.chunks.length,
+            partialMemory: memory,
+            sourceMessageCount: sourceChat.length,
+            boundary: split.boundary,
+        };
+        chat_metadata[ARCHIVE_RUNTIME_METADATA_KEY] = structuredClone(lastArchiveRuntime);
+        await context.saveChat();
+        updateUi();
 
         const calibrationEvidence = [
             { id: split.boundary - 1, role: 'system', name: '历史记忆', content: formatArchiveForPrompt(memory, subject) },

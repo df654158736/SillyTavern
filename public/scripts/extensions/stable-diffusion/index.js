@@ -3365,7 +3365,7 @@ async function generateKreaScenePrompt(instruction, sceneText = null) {
         }))
         : [{ role: 'user', content: String(sceneText).slice(0, 12000) }];
     const sharedAppearance = character?.data?.extensions?.sd_character_prompt?.positive;
-    const characterAppearance = String(sharedAppearance || character?.data?.description || character?.description || '').slice(0, 2500);
+    const characterAppearance = String(sharedAppearance || getCharacterAppearance(character)).slice(0, 4000);
     const messages = [
         { role: 'system', content: substituteParams(instruction) },
         {
@@ -3386,6 +3386,25 @@ async function generateKreaScenePrompt(instruction, sceneText = null) {
         { thinking: { type: 'disabled' } },
     );
     return response?.content || '';
+}
+
+function getCharacterAppearance(character) {
+    const description = String(character?.data?.description || character?.description || '').trim();
+    if (!description) {
+        return '';
+    }
+
+    try {
+        const structuredDescription = JSON.parse(description);
+        const appearance = structuredDescription?.character_sheet?.detailed_description?.appearance;
+        if (typeof appearance === 'string' && appearance.trim()) {
+            return appearance.trim();
+        }
+    } catch {
+        // Plain-text character descriptions are valid and used as the fallback below.
+    }
+
+    return description;
 }
 
 /**
@@ -5297,8 +5316,19 @@ async function sdMessageButton($icon, { animate } = {}) {
         $media = messageElement.find(`.mes_media_container[data-index="${index}"]`).find('.mes_img, .mes_video');
     }
 
+    // The message paintbrush always starts a new scene extraction. Existing media
+    // remains available in the gallery, but its saved image prompt must not turn a
+    // second paintbrush click into a variation of the previous image.
+    const sceneSource = {
+        url: '',
+        title: message.mes,
+        type: MEDIA_TYPE.IMAGE,
+        generation_type: generationMode.KREA_SCENE,
+        needs_prompt_generation: true,
+    };
+
     const newMediaAttachment = await generateMediaSwipe(
-        selectedMedia,
+        sceneSource,
         message,
         () => setBusyIcon(true),
         () => setBusyIcon(false),

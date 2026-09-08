@@ -146,6 +146,20 @@ export function splitHistoryForArchive(messages, keepRecent = DEFAULT_KEEP_RECEN
     return { archived, recent, chunks, boundary, keepRecent: recent.length };
 }
 
+export function getArchiveResumeCheckpoint(checkpoint, sourceMessageCount, boundary, totalChunks, subject = {}) {
+    const completedChunks = Number(checkpoint?.completedChunks);
+    const checkpointTotal = Number(checkpoint?.totalChunks);
+    const matchesSource = checkpoint?.partialMemory
+        && checkpoint.sourceMessageCount === sourceMessageCount
+        && checkpoint.boundary === boundary
+        && checkpointTotal === totalChunks;
+    if (!matchesSource || !Number.isInteger(completedChunks) || completedChunks <= 0 || completedChunks > totalChunks) return null;
+    return {
+        memory: normalizeArchive(checkpoint.partialMemory, subject),
+        completedChunks,
+    };
+}
+
 export function buildArchiveUpdatePayload(previousArchive, messages, subject) {
     return {
         task: 'Update the durable historical memory from the next chronological block of accepted chat messages.',

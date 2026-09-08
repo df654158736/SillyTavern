@@ -19,6 +19,7 @@ import {
 import {
     createContinuationChat,
     formatArchiveForPrompt,
+    getArchiveResumeCheckpoint,
     normalizeArchive,
     parseRepairableJsonObject,
     splitHistoryForArchive,
@@ -428,6 +429,36 @@ describe('Living State Harness long-chat archive', () => {
         expect(prompt).toContain('accepted past story facts, not current state');
         expect(prompt).toContain('关系演变及原因');
         expect(prompt).not.toContain('当前情绪');
+    });
+
+    test('resumes after every archive chunk was completed', () => {
+        const partialMemory = normalizeArchive({
+            overview: '已经整理完成的历史',
+            chronology: ['[消息 1] 已发生的事件。'],
+            durableFacts: ['[消息 1] 持续事实。'],
+        }, archiveSubject);
+        const resumed = getArchiveResumeCheckpoint({
+            partialMemory,
+            sourceMessageCount: 115,
+            boundary: 95,
+            completedChunks: 4,
+            totalChunks: 4,
+        }, 115, 95, 4, archiveSubject);
+
+        expect(resumed?.completedChunks).toBe(4);
+        expect(resumed?.memory.overview).toBe('已经整理完成的历史');
+    });
+
+    test('rejects an archive checkpoint from a different chat revision', () => {
+        const resumed = getArchiveResumeCheckpoint({
+            partialMemory: { overview: '旧摘要' },
+            sourceMessageCount: 114,
+            boundary: 94,
+            completedChunks: 4,
+            totalChunks: 4,
+        }, 115, 95, 4, archiveSubject);
+
+        expect(resumed).toBeNull();
     });
 
     test('keeps foundational and newest history when a repeated archive exceeds its capacity', () => {
