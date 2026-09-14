@@ -1,4 +1,5 @@
 import { SNAPSHOT_KEY, normalizeState, sanitizeEvidenceText, saveStateSnapshot } from './state.js';
+import { archiveContext } from './context.js';
 
 export const ARCHIVE_METADATA_KEY = 'living_state_harness_archive';
 export const ARCHIVE_RUNTIME_METADATA_KEY = 'living_state_harness_archive_runtime';
@@ -216,6 +217,7 @@ export function createContinuationChat(recentMessages, state, subject) {
     const anchor = continuation.length - 1;
     const continuedState = normalizeState(state, subject);
     continuedState.processedThroughMessageId = anchor;
+    continuedState.context = archiveContext(continuedState.context);
     saveStateSnapshot(continuation[anchor], anchor, continuedState, {
         kind: 'archive-continuation',
         changed: false,

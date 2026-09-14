@@ -82,13 +82,17 @@ describe('Living State Harness state ledger', () => {
         const prompt = formatStateForPrompt(result.state);
         expect(prompt).toContain('明早需要上课');
         expect(prompt).toContain('Subject: character "小雅"');
-        expect(prompt).toContain('小雅.Plan');
+        expect(prompt).not.toContain('小雅.Plan'); // Legacy inferred plans await evidence.
+        expect(prompt).toContain('Previous limit (scope unverified; check original dialogue)');
+        expect(result.state.agency.currentPlan).toBe(delta.agencyChanges.currentPlan);
         expect(prompt).toContain('Relationship (小雅 toward D)');
         expect(prompt).toContain('Trust high');
         expect(prompt).toContain('Tension high');
         expect(prompt).not.toContain('/10');
         expect(prompt).not.toContain('仍愿意交流，但隐瞒造成损伤');
         expect(prompt).toContain('No score or creative setting may override this');
+        expect(prompt).toContain('not dialogue templates');
+        expect(prompt).toContain('Do not force warmth, composure, or instant repair');
         expect(prompt).not.toContain('Response Contract');
         expect(prompt).not.toContain('剧情推进单元');
         expect(normalizeState(JSON.parse(JSON.stringify(result.state)))).toEqual(result.state);
@@ -149,6 +153,7 @@ describe('Living State Harness state ledger', () => {
     test('does not invent neutral scores for legacy state and keeps hard boundaries in assertive mode', () => {
         const legacy = createEmptyState(subject);
         delete legacy.signals;
+        legacy.scene.location = '公园';
         const normalized = normalizeState(legacy, subject);
         const prompt = formatStateForPrompt(normalized, subject, {
             stateInfluence: 'strong',
@@ -162,6 +167,8 @@ describe('Living State Harness state ledger', () => {
         expect(prompt).toContain('may actively pursue personal goals');
         expect(prompt).toContain('stop before any new commitment');
         expect(prompt).toContain('Hard boundary: never decide "D"');
+        expect(prompt).toContain('ordinary wishes do not imply supervision');
+        expect(prompt).toContain('Compliance or a topic change does not revoke it');
     });
 
     test('removes generated metadata blocks from evidence', () => {
@@ -181,6 +188,20 @@ describe('Living State Harness state ledger', () => {
 
         expect(result.state.agency.responseIfBlocked).toBe('');
         expect(result.state.offscreenLife.upcomingObligations).toEqual([]);
+    });
+
+    test('clears an orphaned blocked response whenever no explicit boundary remains', () => {
+        const previous = createEmptyState(subject);
+        previous.agency.boundary = '不接受继续隐瞒高风险事件';
+        previous.agency.responseIfBlocked = '暂停谈话并确认事实';
+
+        const result = mergeDelta(previous, {
+            subject: { role: 'character', name: '小雅' },
+            agencyChanges: { boundary: '', responseIfBlocked: null },
+        }, [2], 2, subject);
+
+        expect(result.state.agency.boundary).toBe('');
+        expect(result.state.agency.responseIfBlocked).toBe('');
     });
 
     test('deduplicates near-identical list items in the injected prompt', () => {

@@ -22,18 +22,11 @@
                 <option value="2">2 — 均衡</option>
                 <option value="4">4 — 较远</option>
             </select>
-            <label for="lsh_updater_model">状态更新模型（不改变正文模型）</label>
-            <select id="lsh_updater_model" class="text_pole">
-                <option value="deepseek-v4-flash">deepseek-v4-flash — 推荐</option>
-                <option value="deepseek-v4-pro">deepseek-v4-pro — 推理较慢</option>
-                <option value="">使用当前正文模型</option>
-            </select>
-            <label for="lsh_archive_model">长对话归档模型（独立设置）</label>
-            <select id="lsh_archive_model" class="text_pole">
-                <option value="deepseek-v4-pro">deepseek-v4-pro — 推荐，细节保留更好</option>
-                <option value="deepseek-v4-flash">deepseek-v4-flash — 更快，但长剧情容易遗漏</option>
-                <option value="">使用当前正文模型</option>
-            </select>
+            <label for="lsh_updater_profile">状态更新连接（不改变正文连接）</label>
+            <select id="lsh_updater_profile" class="text_pole"></select>
+            <small class="lsh-muted">选择完整连接配置，API、地址、密钥和模型会一起使用；切换正文到 Google 时不会把 DeepSeek 模型名发给 Google。</small>
+            <label for="lsh_archive_profile">长对话归档连接（独立设置）</label>
+            <select id="lsh_archive_profile" class="text_pole"></select>
             <label for="lsh_response_tokens">更新器最大输出 Token</label>
             <input id="lsh_response_tokens" class="text_pole" type="number" min="8192" max="16384" step="1024">
             <label for="lsh_message_window">每次最多分析的新消息数</label>

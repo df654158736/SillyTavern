@@ -1,3 +1,5 @@
+import { applyContextDelta, normalizeContext, projectContext } from './context.js';
+
 export const SNAPSHOT_KEY = 'living_state_harness';
 export const PROMPT_KEY = 'living_state_harness';
 export const REASONING_RECOVERY_KEY = 'living_state_harness_reasoning_recovery';
@@ -71,6 +73,22 @@ export function createEmptyState(subject = {}) {
             openThreads: [],
         },
         recentTurningPoints: [],
+        context: normalizeContext(null),
+    };
+}
+
+export function createEmptyDelta(subject) {
+    return {
+        subject: { role: 'character', name: subject.name },
+        sceneChanges: { location: null, presentCharacters: null, immediateSituation: null },
+        characterChanges: Object.fromEntries(['currentMood', 'physicalState', 'attentionFocus', 'currentGoal', 'currentConcern', 'privateImpulse', 'inhibition'].map(key => [key, null])),
+        agencyChanges: Object.fromEntries(['currentPlan', 'initiativeSeed', 'boundary', 'responseIfBlocked'].map(key => [key, null])),
+        relationshipChanges: { trust: null, emotionalCloseness: null, authorityDynamic: null, currentTension: null, evolvedPreferencesAdd: [], evolvedPreferenceIdsRemove: [] },
+        signalChanges: Object.fromEntries(Object.keys(SIGNAL_DEFINITIONS).map(key => [key, null])),
+        offscreenLifeChanges: { recentEventsAdd: [], recentEventIdsRemove: [], upcomingObligationsAdd: [], upcomingObligationIdsClose: [], peopleOnMindAdd: [], peopleOnMindIdsRemove: [] },
+        continuityChanges: { importantFactsAdd: [], importantFactIdsRemove: [], openPromisesAdd: [], openPromiseIdsClose: [], openThreadsAdd: [], openThreadIdsClose: [] },
+        turningPointsAdd: [],
+        turningPointIdsRemove: [],
     };
 }
 
@@ -100,6 +118,7 @@ export function normalizeState(input, subject = null) {
     base.continuity.openPromises = normalizeItems(input.continuity?.openPromises, LIST_LIMITS.openPromises);
     base.continuity.openThreads = normalizeItems(input.continuity?.openThreads, LIST_LIMITS.openThreads);
     base.recentTurningPoints = normalizeItems(input.recentTurningPoints, LIST_LIMITS.recentTurningPoints);
+    base.context = normalizeContext(input.context);
     return base;
 }
 
@@ -162,7 +181,8 @@ export function invalidateSnapshots(chat, fromMessageId) {
 
 export function sanitizeEvidenceText(text) {
     return String(text ?? '')
-        .replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+        .replace(/<(thinking|think)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+        .replace(/<(?:thinking|think)\b[^>]*>[\s\S]*$/gi, '')
         .replace(/<!--\s*Start the ECoT\s*-->[\s\S]*?<!--\s*End of The ECoT\s*-->/gi, '')
         .replace(/^\s*ECoT\s*[：:]\s*\*[\s\S]*?\*(?=\s*<content>)/i, '')
         .replace(/<meow_FM>[\s\S]*?<\/meow_FM>/gi, '')
@@ -187,7 +207,7 @@ export function collectMessages(chat, afterMessageId, throughMessageId, maximum)
         .slice(-maximum);
 }
 
-export function mergeDelta(previousState, delta, evidenceIds, throughMessageId, subject = null) {
+export function mergeDelta(previousState, delta, evidenceIds, throughMessageId, subject = null, messages = []) {
     const targetSubject = normalizeSubject(subject ?? previousState?.subject);
     assertDeltaSubject(delta, targetSubject);
     const state = normalizeState(previousState, targetSubject);
@@ -200,6 +220,7 @@ export function mergeDelta(previousState, delta, evidenceIds, throughMessageId, 
     }
     applyStringChanges(state.character, delta?.characterChanges, Object.keys(state.character));
     applyStringChanges(state.agency, delta?.agencyChanges, Object.keys(state.agency));
+    if (!state.agency.boundary) state.agency.responseIfBlocked = '';
     applyStringChanges(state.relationship, delta?.relationshipChanges, ['trust', 'emotionalCloseness', 'authorityDynamic', 'currentTension']);
     applySignalChanges(state.signals, delta?.signalChanges, allowedEvidence);
 
@@ -211,6 +232,8 @@ export function mergeDelta(previousState, delta, evidenceIds, throughMessageId, 
     updateList(state.continuity.openPromises, delta?.continuityChanges?.openPromisesAdd, delta?.continuityChanges?.openPromiseIdsClose, allowedEvidence, 'promise', LIST_LIMITS.openPromises);
     updateList(state.continuity.openThreads, delta?.continuityChanges?.openThreadsAdd, delta?.continuityChanges?.openThreadIdsClose, allowedEvidence, 'thread', LIST_LIMITS.openThreads);
     updateList(state.recentTurningPoints, delta?.turningPointsAdd, delta?.turningPointIdsRemove, allowedEvidence, 'turning-point', LIST_LIMITS.recentTurningPoints);
+
+    applyContextDelta(state, normalizeState(previousState, targetSubject), delta, messages);
 
     state.processedThroughMessageId = Number(throughMessageId);
     const comparisonState = cloneState(state);
@@ -244,8 +267,8 @@ function normalizeReferenceIds(value) {
     return [...new Set(ids)];
 }
 
-export function formatStateForPrompt(input, subject = null, guidance = {}) {
-    const state = normalizeState(input, subject);
+export function formatStateForPrompt(input, subject = null, guidance = {}, messages = []) {
+    const { state, boundaries, legacyBoundary } = projectContext(normalizeState(input, subject), messages);
     const characterName = state.subject.name || 'the active character';
     const counterpartName = state.subject.counterpartName || 'the user';
     const fixedStart = [
@@ -255,10 +278,10 @@ export function formatStateForPrompt(input, subject = null, guidance = {}) {
     ];
     const fixedEnd = [
         ...formatNarrativeGuidance(guidance, characterName, counterpartName),
-        `All Character State, Agency, Offscreen Life, and Relationship perspective fields above belong exclusively to "${characterName}", never to user "${counterpartName}".`,
         `Hard boundary: never decide "${counterpartName}"'s private thoughts, new commitments, consequential dialogue, plans, feelings, or key actions. No score or creative setting may override this.`,
-        'Behavior signals are coarse descriptive estimates, not objectives to maximize. Accepted story facts and textual state take precedence.',
-        `Use this state as latent context. Let "${characterName}" choose naturally; do not force every item into the next reply. Character card, established chat facts, and world rules take precedence.`,
+        'State describes the last confirmed situation; newer accepted dialogue may update it. Follow the character card for personality and voice. Plans are possibilities, not dialogue templates; ordinary wishes do not imply supervision or a refusal.',
+        'Apply each explicit limit only to its stated subject and circumstances. Compliance or a topic change does not revoke it. Do not invent pressure, punishment, or a scripted response.',
+        'Signals are descriptive, not goals. Let feelings develop through events. Do not force warmth, composure, or instant repair.',
         '[/Current Living State]',
     ];
     const candidates = [
@@ -272,7 +295,7 @@ export function formatStateForPrompt(input, subject = null, guidance = {}) {
         promptTextCandidate(80, 0, `${characterName}.Plan`, [state.agency.currentPlan], 160),
         promptTextCandidate(90, 2, `${characterName}.Possible initiative`, [state.agency.initiativeSeed], 130),
         promptTextCandidate(100, 2, `${characterName}.Impulse / inhibition`, [state.character.privateImpulse, state.character.inhibition], 180),
-        promptTextCandidate(110, 1, `${characterName}.Boundary`, [state.agency.boundary, state.agency.responseIfBlocked], 180),
+        promptTextCandidate(110, 1, 'Previous limit (scope unverified; check original dialogue)', [legacyBoundary], 240),
         promptTextCandidate(120, 0, `Relationship (${characterName} toward ${counterpartName})`, [state.relationship.trust, state.relationship.emotionalCloseness, state.relationship.authorityDynamic, state.relationship.currentTension], 260),
         promptSignalCandidate(130, 1, state.signals),
         promptListCandidate(140, 4, `${characterName}.Evolved preferences`, state.relationship.evolvedPreferences, 1),
@@ -284,7 +307,8 @@ export function formatStateForPrompt(input, subject = null, guidance = {}) {
         promptListCandidate(200, 1, 'Open threads', state.continuity.openThreads, 2),
         promptListCandidate(210, 3, 'Recent turning points', state.recentTurningPoints, 1),
     ];
-    return composeBudgetedPrompt(fixedStart, candidates, fixedEnd);
+    const limits = boundaries.map(b => `Explicit limit: ${b.text} | Applies: ${b.appliesWhen} | Ends only when: ${b.endsWhen}`);
+    return composeBudgetedPrompt([...fixedStart, ...limits], candidates, fixedEnd);
 }
 
 export function normalizeGuidance(input = {}) {
@@ -351,7 +375,7 @@ export function areCompatibleCharacterNames(left, right) {
 function canonicalCharacterName(value) {
     return cleanString(value)
         .normalize('NFKC')
-        .replace(/\([^()]*\)|（[^（）]*）|\[[^\[\]]*\]|【[^【】]*】/g, '')
+        .replace(/\([^()]*\)|（[^（）]*）|\[[^[\]]*\]|【[^【】]*】/g, '')
         .replace(/[\s\p{P}\p{S}]+/gu, '')
         .toLocaleLowerCase();
 }
@@ -487,6 +511,8 @@ function cleanString(value) {
 
 function formatSignalLine(signals) {
     const values = Object.entries(SIGNAL_DEFINITIONS)
+        // Readiness/pressure stay visible for inspection, not as instructions to act.
+        .filter(([key]) => !['initiativeReadiness', 'boundaryPressure'].includes(key))
         .map(([key, definition]) => {
             const signal = normalizeSignal(signals?.[key]);
             if (signal.value === null) return '';
@@ -593,6 +619,7 @@ function composeBudgetedPrompt(fixedStart, candidates, fixedEnd) {
         seen.push(...rendered.values);
         remaining -= rendered.line.length + 1;
     }
+    if (!selected.length && start.length === 3) return '';
     return [...start, ...selected.sort((left, right) => left.order - right.order).map(item => item.line), ...end].join('\n');
 }
 

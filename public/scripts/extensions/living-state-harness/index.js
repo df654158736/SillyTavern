@@ -18,6 +18,7 @@ import {
     updateMessageBlock,
 } from '../../../script.js';
 import { extension_settings, getContext, renderExtensionTemplateAsync } from '../../extensions.js';
+import { ConnectionManagerRequestService } from '../shared.js';
 import { getTokenCountAsync } from '../../tokenizers.js';
 import { removeReasoningFromString } from '../../reasoning.js';
 import { selected_group } from '../../group-chats.js';
@@ -30,6 +31,7 @@ import {
     SNAPSHOT_KEY,
     assertDeltaSubject,
     collectMessages,
+    createEmptyDelta,
     createEmptyState,
     findLatestSnapshot,
     formatStateForPrompt,
@@ -41,6 +43,7 @@ import {
     recoverStoryContentFromReasoning,
     saveStateSnapshot,
 } from './state.js';
+import { buildContextUpdaterInstructions, buildReferenceContext, describeContext, formatContextRequest, prepareStateForUpdater, validateContextDelta } from './context.js';
 import {
     ARCHIVE_METADATA_KEY,
     ARCHIVE_PROMPT_KEY,
@@ -63,6 +66,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     depth: 2,
     updaterModel: 'deepseek-v4-flash',
     archiveModel: 'deepseek-v4-pro',
+    updaterProfile: '',
+    archiveProfile: '',
     responseTokens: 8192,
     messageWindow: 20,
     recoverStoryFromReasoning: true,
@@ -142,6 +147,75 @@ function getSettings() {
     return extension_settings[MODULE_NAME];
 }
 
+function getSupportedConnectionProfiles() {
+    try {
+        return ConnectionManagerRequestService.getSupportedProfiles();
+    } catch (error) {
+        console.warn('Living State Harness could not read connection profiles:', error);
+        return [];
+    }
+}
+
+function migrateLegacyModelSettings(settings) {
+    const profiles = getSupportedConnectionProfiles();
+    const findByModel = model => profiles.find(profile => String(profile.model || '') === String(model || ''))?.id || '';
+    if (!settings.updaterProfile && settings.updaterModel) settings.updaterProfile = findByModel(settings.updaterModel);
+    if (!settings.archiveProfile && settings.archiveModel) settings.archiveProfile = findByModel(settings.archiveModel);
+}
+
+function populateProfileSelect(selector, selectedProfile) {
+    const select = $(selector).empty();
+    select.append($('<option></option>').val('').text('使用当前正文连接'));
+    for (const profile of getSupportedConnectionProfiles()) {
+        select.append($('<option></option>').val(profile.id).text(`${profile.name} · ${profile.model || '默认模型'}`));
+    }
+    select.val(selectedProfile || '');
+    if (select.val() === null) select.val('');
+}
+
+function getProfileLabel(profileId) {
+    if (!profileId) return 'current';
+    const profile = getSupportedConnectionProfiles().find(item => item.id === profileId);
+    return profile ? `${profile.name} · ${profile.model || '默认模型'}` : 'missing profile';
+}
+
+async function runHarnessCompletion({ prompt, systemPrompt, responseLength, profileId, jsonSchema = null }) {
+    const normalizedProfileId = String(profileId || '').trim();
+    if (!normalizedProfileId) {
+        return generateRaw({
+            prompt,
+            systemPrompt,
+            responseLength,
+            trimNames: false,
+            model: null,
+            thinking: 'disabled',
+            skipChatCompletionSettings: true,
+            ignoreGenerationStop: true,
+            jsonSchema,
+        });
+    }
+
+    const messages = [
+        ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
+        ...(Array.isArray(prompt) ? prompt : [{ role: 'user', content: String(prompt || '') }]),
+    ];
+    const result = await ConnectionManagerRequestService.sendRequest(
+        normalizedProfileId,
+        messages,
+        responseLength,
+        { extractData: true, includePreset: false, stream: false },
+        {
+            thinking: { type: 'disabled' },
+            ...(jsonSchema ? { json_schema: jsonSchema } : {}),
+        },
+    );
+    const content = result?.content;
+    if (content === undefined || content === null || content === '') {
+        throw new Error('Harness connection profile returned no content.');
+    }
+    return content;
+}
+
 function getSubjectIdentity(context = getContext()) {
     return {
         role: 'character',
@@ -201,16 +275,16 @@ async function updateStateInBackground(messageId, type) {
     const startedAt = performance.now();
 
     try {
-        const prompt = buildUpdaterPrompt(previousState, messages, settings.authorLocks, subject);
+        const prompt = buildUpdaterPrompt(previousState, messages, settings.authorLocks, subject, chat);
         const updaterInputTokens = await safeTokenCount(prompt);
-        const delta = await runUpdaterWithRetry(prompt, settings.responseTokens, settings.updaterModel, subject);
+        const delta = await runUpdaterWithRetry(prompt, settings.responseTokens, settings.updaterProfile, subject);
         const updaterOutputTokens = await safeTokenCount(JSON.stringify(delta));
         if (updateRevision !== historyRevision || getContext().chat !== chat || chat[targetMessageId] !== targetMessage) {
             lastRuntime = { ...lastRuntime, status: 'stale', error: '', updatedAt: new Date().toISOString() };
             await restoreInjection();
             return;
         }
-        const { state, changed } = mergeDelta(previousState, delta, messages.map(message => message.id), targetMessageId, subject);
+        const { state, changed } = mergeDelta(previousState, delta, messages.map(message => message.id), targetMessageId, subject, messages);
         saveSnapshot(targetMessage, targetMessageId, state, delta, changed, 'post-response');
         syncMesToSwipe(targetMessageId);
         carryStateForwardToPendingUser(chat, targetMessageId, state);
@@ -253,26 +327,24 @@ async function updateStateInBackground(messageId, type) {
  * install a global prompt hook: other extensions can issue concurrent auxiliary
  * requests (for example emotion classification), and a global hook would corrupt them.
  */
-async function runUpdater(prompt, responseLength, model, subject) {
+async function runUpdater(prompt, responseLength, profileId, subject, correction = '') {
     const systemPrompt = buildUpdaterSystemPrompt();
-    const jsonPrompt = `${prompt}\n\nReturn one JSON object only. Use this exact shape and use null/[] for unchanged fields:\n${JSON.stringify(createEmptyDelta(subject))}\n\nEvery item in an *Add array must be an object shaped as {"text":"...","reason":"...","evidenceMessageIds":[0]}; never return a bare string. evidenceMessageIds must cite message ids from newMessages.`;
-    return generateRaw({
+    const jsonPrompt = formatContextRequest(prompt, createEmptyDelta(subject), correction);
+    return runHarnessCompletion({
         prompt: [{ role: 'user', content: jsonPrompt }],
         systemPrompt: `${systemPrompt}\n立即输出 JSON；不要展示分析过程，不要使用 Markdown 代码块，不要在 JSON 外添加文字。`,
         responseLength: Math.max(8192, responseLength),
-        trimNames: false,
-        model: String(model || '').trim() || null,
-        thinking: 'disabled',
-        skipChatCompletionSettings: true,
-        ignoreGenerationStop: true,
+        profileId,
     });
 }
 
-async function runUpdaterWithRetry(prompt, responseLength, model, subject) {
+async function runUpdaterWithRetry(prompt, responseLength, profileId, subject) {
     let lastError;
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-            return parseDelta(await runUpdater(prompt, responseLength, model, subject), subject);
+            const delta = parseDelta(await runUpdater(prompt, responseLength, profileId, subject, lastError?.message), subject);
+            validateContextDelta(delta, JSON.parse(prompt).newMessages);
+            return delta;
         } catch (error) {
             lastError = error;
             console.warn(`Living State Harness updater attempt ${attempt} failed`, error);
@@ -284,7 +356,9 @@ async function runUpdaterWithRetry(prompt, responseLength, model, subject) {
 
 async function injectPrompts(state) {
     const settings = getSettings();
-    const statePrompt = state ? formatStateForPrompt(state, null, settings) : '';
+    const chat = getContext().chat ?? [];
+    const messages = collectMessages(chat, -1, chat.length - 1, 4);
+    const statePrompt = state ? formatStateForPrompt(state, null, settings, messages) : '';
     setExtensionPrompt(PROMPT_KEY, statePrompt, extension_prompt_types.IN_CHAT, settings.depth, false, extension_prompt_roles.SYSTEM);
     const archivePrompt = formatStoredArchivePrompt();
     setExtensionPrompt(ARCHIVE_PROMPT_KEY, archivePrompt, extension_prompt_types.IN_CHAT, Math.max(settings.depth + 2, 4), false, extension_prompt_roles.SYSTEM);
@@ -338,12 +412,12 @@ function carryStateForwardToPendingUser(chat, assistantMessageId, state) {
     return true;
 }
 
-function buildUpdaterPrompt(previousState, messages, authorLocks, subject) {
+function buildUpdaterPrompt(previousState, messages, authorLocks, subject, chat = []) {
     const fields = getCharacterCardFields();
     const character = characters[this_chid];
     const characterCore = {
         name: character?.name ?? '',
-        description: truncate(fields.description, 3000),
+        description: truncate(fields.description, 12000),
         personality: truncate(fields.personality, 1400),
         scenario: truncate(fields.scenario, 1400),
     };
@@ -352,51 +426,14 @@ function buildUpdaterPrompt(previousState, messages, authorLocks, subject) {
         targetSubject: subject,
         characterCore,
         authorLocks: String(authorLocks ?? '').split('\n').map(line => line.trim()).filter(Boolean),
-        previousState,
-        newMessages: compactEvidence(messages.slice(-6)),
+        previousState: prepareStateForUpdater(previousState),
+        ...buildReferenceContext(collectMessages(chat, -1, (messages[0]?.id ?? 0) - 1, 40)),
+        newMessages: messages,
     });
 }
 
-function compactEvidence(messages, totalCharacters = 12000, perMessageCharacters = 3000) {
-    let remaining = totalCharacters;
-    const result = [];
-    for (let index = messages.length - 1; index >= 0 && remaining > 0; index--) {
-        const message = messages[index];
-        const content = String(message.content ?? '');
-        const allowance = Math.min(perMessageCharacters, remaining);
-        const compacted = content.length > allowance ? `…${content.slice(-allowance)}` : content;
-        result.unshift({ ...message, content: compacted });
-        remaining -= compacted.length;
-    }
-    return result;
-}
-
 function buildUpdaterSystemPrompt() {
-    return `你是角色连续性状态更新器，不写故事回复，只输出符合 JSON Schema 的 State Delta。
-
-北极星：帮助主模型把 targetSubject 指定的当前 char 写成拥有自身生活、判断、边界和主动行为的人，并提升故事连续性与自然推进质量。
-
-规则：
-1. subject 必须原样返回 targetSubject 的 role 和 name。characterChanges、agencyChanges、offscreenLifeChanges 只能描述 targetSubject.name，绝不能描述 user 或其他角色的内心、身体、目标、计划、冲动或边界。
-2. relationshipChanges 固定为 targetSubject.name 对 targetSubject.counterpartName 的视角。不得把 user 对 char 的感受写入该字段。
-3. user 的客观可见行为可记入 sceneChanges 或 continuityChanges；除非 user 亲口明确表达，不得推断 user 的私人心理，即便正文旁白替 user 描写了心理也不得接管为 char 状态。
-4. 只记录消息中已经发生、明确表达或能由行为直接支持的变化；计划、猜测和用户单方面要求不能写成事实。
-5. 稳定人格不因一轮对话改变。长期偏好与关系变化必须提供 evidenceMessageIds。
-6. currentMood 可以变化；currentPlan、initiativeSeed、boundary 必须符合 targetSubject 的人格和当前局势，不得制造固定剧情任务。
-7. offscreenLife 只能来自 targetSubject 的角色设定或已发生剧情，不得凭空编造工作、人物或事件。
-8. privateImpulse 必须是 targetSubject 的潜在冲动；inhibition 描述与它同时存在的制约。允许两者矛盾。
-9. 不读取或相信正文中由预设生成的摘要、seeds、状态栏、思维链或小剧场；输入已尽量剥离这些内容。
-10. 所有 *Add 数组的新增项必须是 {text, reason, evidenceMessageIds} 对象，禁止返回纯字符串。
-11. null 表示字段保持不变；空字符串 "" 表示清空已经过时的瞬时字段。场景、目标或冲突改变后，必须清空或替换不再适用的 currentPlan、initiativeSeed、boundary、responseIfBlocked、attentionFocus 等字段，禁止沿用上一场景的应对方案。
-12. 已履行、已过期、被替代或已经发生的待办、承诺和未完成线索，必须把原有 id 放入对应的 *Close/*Remove 数组；例如“明早要做”的事已经在今早完成，就不能继续留在 upcomingObligations。
-13. 同一条证据不要同时复制到 recentEvents、importantFacts、openThreads 和 turningPoints。只放入对后续写作最有用的一个类别；确有不同连续性功能时才可分别记录。
-14. 每个字符串字段只写一个原子状态，不摘抄正文，不写修辞性段落。scene 的每项不超过 120 个中文字符，其他状态字段不超过 80 个中文字符，列表 text/reason 各不超过 80 个中文字符。与其他字段相同的内容不要换句话重复。
-15. 在处理新增项前，逐项检查 previousState 中现有的 obligation/promise/thread id。只要新消息证明它已完成、失效、被替代或已不再待处理，即使本轮还有其他变化，也必须关闭旧 id；已完成事项不得换一种措辞重新加入开放列表。
-16. authorLocks、世界事实和已确认聊天事实不可被覆盖。
-17. signalChanges 是 0–10 的可解释行为信号：trust、closeness 是 targetSubject 对 user 的长期关系信号；tension、initiativeReadiness、boundaryPressure 是此刻动态信号。它们描述状态，不是需要最大化的目标。
-18. 只有新消息提供直接证据时才更新某个信号，并返回 {value, confidence, reason, evidenceMessageIds}。value 必须是 0–10 整数；confidence 只能是 low/medium/high；reason 用一句话解释证据。无新证据必须返回 null。
-19. trust、closeness 应缓慢变化。普通照顾、日常肢体接触、相似语气或重复表现不能再次加分；7 以上需要持续关系证据，9–10 只用于明确、稳定且重大的关系里程碑。tension、initiativeReadiness、boundaryPressure 可以随眼前局势较快变化，但不得仅凭文风或模型生成的 user 私人心理评分。
-20. 无变化时返回字段为空的 Delta。不要复述上一状态。`;
+    return buildContextUpdaterInstructions();
 }
 
 function parseDelta(rawResult, subject) {
@@ -419,20 +456,6 @@ function extractJsonObject(value) {
     return text.slice(start, end + 1);
 }
 
-function createEmptyDelta(subject) {
-    return {
-        subject: { role: 'character', name: subject.name },
-        sceneChanges: { location: null, presentCharacters: null, immediateSituation: null },
-        characterChanges: Object.fromEntries(['currentMood', 'physicalState', 'attentionFocus', 'currentGoal', 'currentConcern', 'privateImpulse', 'inhibition'].map(key => [key, null])),
-        agencyChanges: Object.fromEntries(['currentPlan', 'initiativeSeed', 'boundary', 'responseIfBlocked'].map(key => [key, null])),
-        relationshipChanges: { trust: null, emotionalCloseness: null, authorityDynamic: null, currentTension: null, evolvedPreferencesAdd: [], evolvedPreferenceIdsRemove: [] },
-        signalChanges: Object.fromEntries(Object.keys(SIGNAL_DEFINITIONS).map(key => [key, null])),
-        offscreenLifeChanges: { recentEventsAdd: [], recentEventIdsRemove: [], upcomingObligationsAdd: [], upcomingObligationIdsClose: [], peopleOnMindAdd: [], peopleOnMindIdsRemove: [] },
-        continuityChanges: { importantFactsAdd: [], importantFactIdsRemove: [], openPromisesAdd: [], openPromiseIdsClose: [], openThreadsAdd: [], openThreadIdsClose: [] },
-        turningPointsAdd: [],
-        turningPointIdsRemove: [],
-    };
-}
 
 function assertEvidenceBackedSignals(delta) {
     for (const key of Object.keys(SIGNAL_DEFINITIONS)) {
@@ -606,7 +629,7 @@ async function calibrateCurrentState() {
     toastr.info('正在校准状态，请稍候……', 'Living State Harness');
     try {
         const evidence = compactCalibrationEvidence(collectMessages(chat, -1, chat.length - 1, chat.length));
-        const delta = await runCalibration(latest.state, evidence, getSettings().updaterModel, subject);
+        const delta = await runCalibration(latest.state, evidence, getSettings().updaterProfile, subject);
         restrictCalibrationDelta(delta);
         const evidenceIds = evidence.map(message => message.id);
         const { state, changed } = mergeDelta(latest.state, delta, evidenceIds, chat.length - 1, subject);
@@ -657,27 +680,24 @@ async function undoLastCalibration() {
     toastr.info('当前聊天没有可撤销的校准。', 'Living State Harness');
 }
 
-async function runCalibration(state, messages, model, subject) {
+async function runCalibration(state, messages, profileId, subject) {
     const prompt = JSON.stringify({
         task: 'Audit the existing Living State against the accepted chat evidence. Return removals/closures only; never add new state.',
         targetSubject: subject,
         currentState: state,
         acceptedMessages: messages,
     });
-    const result = await generateRaw({
+    const result = await runHarnessCompletion({
         prompt: [{ role: 'user', content: `${prompt}\n\nReturn one JSON object only with this exact shape:\n${JSON.stringify(createEmptyDelta(subject))}` }],
-        systemPrompt: `你是角色状态校准器，只清理已有状态，不写故事、不新增事实。逐项检查当前开放的待办、承诺和线索；只有聊天证据明确证明已完成、取消、失效或重复时才关闭。无法确定的一律保留。重要事实和转折点是历史记录，除非完全重复、被明确否定或明显不属于该角色，否则保留。关闭或移除项只返回现有 id 字符串。立即输出 JSON，不要解释。`,
+        systemPrompt: '你是角色状态校准器，只清理已有状态，不写故事、不新增事实。逐项检查当前开放的待办、承诺和线索；只有聊天证据明确证明已完成、取消、失效或重复时才关闭。无法确定的一律保留。重要事实和转折点是历史记录，除非完全重复、被明确否定或明显不属于该角色，否则保留。关闭或移除项只返回现有 id 字符串。立即输出 JSON，不要解释。',
         responseLength: 8192,
-        trimNames: false,
-        model: String(model || '').trim() || null,
-        thinking: 'disabled',
-        skipChatCompletionSettings: true,
-        ignoreGenerationStop: true,
+        profileId,
     });
     return parseDelta(result, subject);
 }
 
 function restrictCalibrationDelta(delta) {
+    delete delta.contextDelta; // Legacy cleanup may close lists, not revoke scoped limits.
     delta.sceneChanges = { location: null, presentCharacters: null, immediateSituation: null };
     delta.characterChanges = Object.fromEntries(Object.keys(delta.characterChanges ?? {}).map(key => [key, null]));
     delta.agencyChanges = Object.fromEntries(Object.keys(delta.agencyChanges ?? {}).map(key => [key, null]));
@@ -782,7 +802,7 @@ async function archiveAndContinue() {
         for (let index = startChunk; index < split.chunks.length; index++) {
             lastArchiveRuntime = { status: 'summarizing', detail: `正在整理历史片段 ${index + 1}/${split.chunks.length}`, completedChunks: index, totalChunks: split.chunks.length };
             updateUi();
-            memory = await runArchiveUpdate(memory, split.chunks[index], subject, settings.archiveModel);
+            memory = await runArchiveUpdate(memory, split.chunks[index], subject, settings.archiveProfile);
             lastArchiveRuntime = {
                 status: 'summarizing',
                 detail: `历史片段已完成 ${index + 1}/${split.chunks.length}`,
@@ -844,7 +864,7 @@ async function archiveAndContinue() {
             { id: split.boundary - 1, role: 'system', name: '历史记忆', content: formatArchiveForPrompt(memory, subject) },
             ...compactCalibrationEvidence(collectMessages(sourceChat, split.boundary - 1, sourceChat.length - 1, split.recent.length), 36000, 2400),
         ];
-        const cleanupDelta = await runCalibration(latest.state, calibrationEvidence, settings.archiveModel, subject);
+        const cleanupDelta = await runCalibration(latest.state, calibrationEvidence, settings.archiveProfile, subject);
         restrictCalibrationDelta(cleanupDelta);
         const { state: calibratedState } = mergeDelta(
             latest.state,
@@ -904,7 +924,7 @@ async function archiveAndContinue() {
                 detail,
                 completedChunks: lastArchiveRuntime.completedChunks,
                 totalChunks: lastArchiveRuntime.totalChunks,
-                model: settings.archiveModel || 'current',
+                model: getProfileLabel(settings.archiveProfile),
                 failedAt: new Date().toISOString(),
                 responsePreview: String(error?.archiveResponsePreview ?? '').slice(0, 2400),
             };
@@ -1015,7 +1035,7 @@ function escapeArchiveHtml(value) {
         .replaceAll('<', '&lt;')
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
+        .replaceAll('\'', '&#039;');
 }
 
 function renderArchiveDetailsHtml(archiveRecord) {
@@ -1054,7 +1074,7 @@ function renderArchiveDetailsHtml(archiveRecord) {
     return `<div class="lsh-archive-view"><div class="lsh-archive-summary-head"><div class="lsh-archive-metric-grid">${metricHtml}</div>${rateHtml}</div><div class="lsh-archive-detail-grid">${sectionHtml}</div></div>`;
 }
 
-async function runArchiveUpdate(previousArchive, messages, subject, model) {
+async function runArchiveUpdate(previousArchive, messages, subject, profileId) {
     const payload = buildArchiveUpdatePayload(previousArchive, messages, subject);
     const groups = [
         ['overview', 'relationshipHistory'],
@@ -1064,27 +1084,23 @@ async function runArchiveUpdate(previousArchive, messages, subject, model) {
     ];
     let archive = normalizeArchive(previousArchive, subject);
     for (const fields of groups) {
-        const partial = await runArchiveSectionUpdate(payload, archive, fields, model);
+        const partial = await runArchiveSectionUpdate(payload, archive, fields, profileId);
         archive = normalizeArchive({ ...archive, ...partial }, subject);
     }
     assertUsefulArchive(archive);
     return archive;
 }
 
-async function runArchiveSectionUpdate(payload, currentArchive, fields, model) {
+async function runArchiveSectionUpdate(payload, currentArchive, fields, profileId) {
     const shape = Object.fromEntries(fields.map(field => [field, currentArchive[field]]));
     let lastError;
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-            const result = await generateRaw({
+            const result = await runHarnessCompletion({
                 prompt: [{ role: 'user', content: `${JSON.stringify({ ...payload, previousArchive: currentArchive })}\n\n只更新并完整返回以下栏目，其他栏目不要输出：${fields.join(', ')}。精确形状：\n${JSON.stringify(shape)}` }],
                 systemPrompt: '你是长期剧情档案整理器，只整理已被接受的聊天事实，不写故事。更新指定栏目时保留已有的关键细节、因果、关系演变、承诺、秘密、伏笔和长期后果；合并重复表达，但不要为了缩短而删除仍可能影响角色行为的事实。清除已明确失效的临时状态。不得推断用户未明确表达的内心。事实条目保留最有力的来源消息编号，如[消息 12]。只输出指定栏目的 JSON 对象。',
                 responseLength: 8192,
-                trimNames: false,
-                model: String(model || '').trim() || null,
-                thinking: 'disabled',
-                skipChatCompletionSettings: true,
-                ignoreGenerationStop: true,
+                profileId,
                 // Prefer provider-enforced JSON. The second attempt deliberately falls
                 // back to prompt-only JSON for OpenAI-compatible relays that reject schemas.
                 jsonSchema: attempt === 1 ? createArchiveSectionJsonSchema(fields) : null,
@@ -1165,6 +1181,8 @@ async function saveManualState() {
 
 function bindSettings() {
     const settings = getSettings();
+    populateProfileSelect('#lsh_updater_profile', settings.updaterProfile);
+    populateProfileSelect('#lsh_archive_profile', settings.archiveProfile);
     $('#lsh_enabled').prop('checked', settings.enabled).on('input', async function () {
         settings.enabled = Boolean($(this).prop('checked'));
         saveSettingsDebounced();
@@ -1181,12 +1199,12 @@ function bindSettings() {
         saveSettingsDebounced();
         await restoreInjection();
     });
-    $('#lsh_updater_model').val(settings.updaterModel).on('change', function () {
-        settings.updaterModel = String($(this).val()).trim();
+    $('#lsh_updater_profile').on('change', function () {
+        settings.updaterProfile = String($(this).val()).trim();
         saveSettingsDebounced();
     });
-    $('#lsh_archive_model').val(settings.archiveModel).on('change', function () {
-        settings.archiveModel = String($(this).val()).trim();
+    $('#lsh_archive_profile').on('change', function () {
+        settings.archiveProfile = String($(this).val()).trim();
         saveSettingsDebounced();
     });
     $('#lsh_response_tokens').val(settings.responseTokens).on('change', function () {
@@ -1251,6 +1269,11 @@ function updateUi() {
     const subject = getSubjectIdentity(context);
     const latest = Array.isArray(context.chat) ? findLatestSnapshot(context.chat, Number.POSITIVE_INFINITY, subject) : null;
     const state = latest?.state ?? createEmptyState(subject);
+    const contextMessages = collectMessages(context.chat ?? [], -1, (context.chat?.length ?? 0) - 1, 4);
+    const stateRow = (label, path) => {
+        const [group, key] = path.split('.');
+        return [label, state[group][key], describeContext(state.context.fields[path], state, contextMessages, path)];
+    };
     const characterName = subject.name || '未选择角色';
     const counterpartName = subject.counterpartName || '用户';
     const status = getStatusPresentation(settings, latest);
@@ -1266,19 +1289,19 @@ function updateUi() {
     $('#lsh_panel_toggle').attr('data-state', status.state);
     $('#lsh_toggle_text').text(status.shortLabel);
     renderGrid('#lsh_now_grid', [
-        ['情绪', state.character.currentMood],
-        ['身体状态', state.character.physicalState],
-        ['注意焦点', state.character.attentionFocus],
-        ['当前目标', state.character.currentGoal],
-        ['担忧', state.character.currentConcern],
-        ['内在冲动', state.character.privateImpulse],
-        ['自我约束', state.character.inhibition],
+        stateRow('情绪', 'character.currentMood'),
+        stateRow('身体状态', 'character.physicalState'),
+        stateRow('注意焦点', 'character.attentionFocus'),
+        stateRow('当前目标', 'character.currentGoal'),
+        stateRow('担忧', 'character.currentConcern'),
+        stateRow('内在冲动', 'character.privateImpulse'),
+        stateRow('自我约束', 'character.inhibition'),
     ]);
     renderGrid('#lsh_agency_grid', [
-        ['当前计划', state.agency.currentPlan],
-        ['可能的主动行动', state.agency.initiativeSeed],
-        ['边界', state.agency.boundary],
-        ['受阻时的反应', state.agency.responseIfBlocked],
+        stateRow('当前计划', 'agency.currentPlan'),
+        stateRow('可能的主动行动', 'agency.initiativeSeed'),
+        ['旧边界（待核验）', state.agency.boundary, '原记录保留；请结合原文确认对象和适用范围。'],
+        ...state.context.boundaries.map(limit => ['明确限制', limit.text, describeContext(limit, state, contextMessages)]),
     ]);
     renderGrid('#lsh_relationship_grid', [
         ['信任', state.relationship.trust],
@@ -1348,10 +1371,16 @@ function renderGrid(selector, rows) {
     const root = $(selector).empty();
     const populated = rows.filter(([, value]) => value);
     if (!populated.length) return root.append($('<div class="lsh-empty"></div>').text('暂无状态，请发送一条消息来建立。'));
-    for (const [label, value] of populated) {
+    for (const [label, value, evidence] of populated) {
         const row = $('<div class="lsh-state-row"></div>');
         row.append($('<div class="lsh-state-key"></div>').text(label));
-        row.append($('<div class="lsh-state-value"></div>').text(value));
+        const content = $('<div class="lsh-state-value"></div>').text(value);
+        if (evidence) {
+            const details = $('<details></details>').append($('<summary></summary>').text('来源与适用范围'));
+            details.append($('<div></div>').css('white-space', 'pre-wrap').text(evidence));
+            content.append(details);
+        }
+        row.append(content);
         root.append(row);
     }
 }
@@ -1438,7 +1467,9 @@ function clamp(value, minimum, maximum) {
 globalThis.livingStateHarnessInterceptor = interceptor;
 
 export async function init() {
-    getSettings();
+    const settings = getSettings();
+    migrateLegacyModelSettings(settings);
+    saveSettingsDebounced();
     const settingsHtml = await renderExtensionTemplateAsync('living-state-harness', 'settings');
     $('#extensions_settings').append(settingsHtml);
     const panelHtml = await renderExtensionTemplateAsync('living-state-harness', 'panel');
