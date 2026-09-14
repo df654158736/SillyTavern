@@ -438,7 +438,10 @@ export class ConnectionManagerRequestService {
                         throw new Error(`API type ${selectedApiMap.selected} does not support chat completions`);
                     }
 
-                    const proxyPreset = proxies.find((p) => p.name === profile.proxy);
+                    const proxyName = String(profile.proxy || '').trim();
+                    const proxyPreset = /^(?:<none>|none)$/i.test(proxyName)
+                        ? undefined
+                        : proxies.find((p) => p.name === proxyName);
 
                     const messages = Array.isArray(prompt) ? prompt : [{ role: 'user', content: prompt }];
                     return await context.ChatCompletionService.processRequest({

@@ -1,5 +1,8 @@
-import fetch from 'node-fetch';
+import baseFetch from 'node-fetch';
 import { getGoogleApiConfig } from '../endpoints/google.js';
+import { createProviderFetch } from '../provider-request-proxy.js';
+
+const fetch = createProviderFetch(baseFetch, 'google');
 
 /**
  * Gets the vector for the given text from Google AI Studio

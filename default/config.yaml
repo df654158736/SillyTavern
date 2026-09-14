@@ -103,6 +103,13 @@ requestProxy:
   bypass:
     - localhost
     - 127.0.0.1
+# -- PROVIDER-SCOPED REQUEST PROXY CONFIGURATION --
+# Routes only the named provider through a proxy. Other outgoing requests remain direct.
+providerRequestProxy:
+  google:
+    enabled: false
+    # Proxy URL. Possible protocols: http, https, socks, socks5, socks4, pac
+    url: "socks5://username:password@example.com:1080"
 # Enable multi-user mode
 enableUserAccounts: false
 # Enable discreet login mode: hides user list on the login screen

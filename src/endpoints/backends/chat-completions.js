@@ -68,6 +68,7 @@ import {
 } from '../tokenizers.js';
 import { getVertexAIAuth, getProjectIdFromServiceAccount } from '../google.js';
 import { getCookieSecret } from '../../users.js';
+import { createProviderFetch } from '../../provider-request-proxy.js';
 
 const API_OPENAI = 'https://api.openai.com/v1';
 const API_CLAUDE = 'https://api.anthropic.com/v1';
@@ -98,6 +99,7 @@ const API_MINIMAX = 'https://api.minimax.io/v1';
 const API_MINIMAX_CN = 'https://api.minimaxi.com/v1';
 const API_OPENROUTER = 'https://openrouter.ai/api/v1';
 const API_WORKERS_AI = 'https://api.cloudflare.com/client/v4/accounts';
+const googleFetch = createProviderFetch(fetch, 'google');
 
 /**
  * Module-scoped Claude caching configuration values.
@@ -719,7 +721,7 @@ async function sendMakerSuiteRequest(request, response) {
             url = `${apiUrl.toString().replace(/\/$/, '')}/${apiVersion}/models/${model}:${responseType}?key=${apiKey}${stream ? '&alt=sse' : ''}`;
         }
 
-        const generateResponse = await fetch(url, {
+        const generateResponse = await googleFetch(url, {
             body: JSON.stringify(body),
             method: 'POST',
             headers: headers,
@@ -1908,7 +1910,7 @@ router.post('/status', async function (request, statusResponse) {
             }
 
             try {
-                const response = await fetch(modelsUrl);
+                const response = await googleFetch(modelsUrl);
 
                 if (response.ok) {
                     /** @type {any} */
