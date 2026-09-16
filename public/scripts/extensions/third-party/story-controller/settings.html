@@ -1,0 +1,74 @@
+<div id="story_controller_settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <div class="flex-container alignitemscenter margin0">
+                <b>Story Controller</b>
+                <span id="sc_settings_status" class="sc-status">已关闭</span>
+            </div>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <label class="checkbox_label" for="sc_enabled">
+                <input id="sc_enabled" type="checkbox">
+                <span>启用剧情控制器</span>
+            </label>
+            <label class="checkbox_label" for="sc_frozen">
+                <input id="sc_frozen" type="checkbox">
+                <span>冻结当前剧情阶段</span>
+            </label>
+            <label for="sc_mode">运行模式</label>
+            <select id="sc_mode" class="text_pole">
+                <option value="observe">观察模式 — 只判断，不推进或注入</option>
+                <option value="control">控制模式 — 推进并注入安全导演信息</option>
+            </select>
+            <label for="sc_director_profile">Director 连接（独立于正文连接）</label>
+            <select id="sc_director_profile" class="text_pole"></select>
+            <small class="sc-muted">首次启用会优先沿用 Harness 的独立模型配置。Director 适合使用响应快、结构化判断稳定的模型；Flash 只是一种可选连接，不作为剧情设计质量的裁判。Director 只读取当前阶段和相邻阶段的公开信息，不读取完整隐藏剧情。</small>
+            <label for="sc_depth">安全导演提示注入深度</label>
+            <select id="sc_depth" class="text_pole">
+                <option value="1">1 — 最近</option>
+                <option value="2">2 — 均衡</option>
+                <option value="4">4 — 较远</option>
+            </select>
+            <label for="sc_message_window">Director 最多分析消息数</label>
+            <input id="sc_message_window" class="text_pole" type="number" min="4" max="30" step="1">
+            <hr>
+            <label for="sc_package_select">已导入剧情包</label>
+            <select id="sc_package_select" class="text_pole"></select>
+            <input id="sc_package_file" type="file" accept="application/json,.json" hidden>
+            <div class="flex-container sc-action-row">
+                <button id="sc_load_s4_package" class="menu_button menu_button_icon" title="载入扩展内置剧情包，但不自动绑定聊天">
+                    <i class="fa-solid fa-box-archive"></i>
+                    <span>载入内置「未完成的尾奏」</span>
+                </button>
+                <button id="sc_import_package" class="menu_button menu_button_icon">
+                    <i class="fa-solid fa-file-import"></i>
+                    <span>导入 JSON</span>
+                </button>
+                <button id="sc_bind_package" class="menu_button menu_button_icon">
+                    <i class="fa-solid fa-link"></i>
+                    <span>绑定当前聊天</span>
+                </button>
+                <button id="sc_unbind_package" class="menu_button menu_button_icon">
+                    <i class="fa-solid fa-link-slash"></i>
+                    <span>解除绑定</span>
+                </button>
+                <button id="sc_remove_package" class="menu_button redWarningBG" title="从设置中删除所选剧情包">
+                    <i class="fa-solid fa-trash"></i>
+                </button>
+            </div>
+            <small id="sc_assignment_note" class="sc-muted">当前聊天尚未绑定剧情包。导入不会自动启用，必须明确绑定。</small>
+            <div class="flex-container sc-action-row">
+                <button id="sc_open_panel" class="menu_button menu_button_icon">
+                    <i class="fa-solid fa-clapperboard"></i>
+                    <span>打开剧情面板</span>
+                </button>
+                <button id="sc_retry" class="menu_button menu_button_icon">
+                    <i class="fa-solid fa-rotate"></i>
+                    <span>重试最近判断</span>
+                </button>
+            </div>
+            <small class="sc-muted">剧情包按聊天绑定。观察模式只校验 OM，不代表正文沉浸感已经通过；请先在复制的剧情分支中短程试用控制模式，出现选择题感、机械停顿或人物反应趋同时立即切回观察模式。</small>
+        </div>
+    </div>
+</div>

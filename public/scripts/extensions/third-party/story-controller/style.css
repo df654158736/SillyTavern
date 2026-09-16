@@ -1,0 +1,230 @@
+:root {
+    --sc-accent: #8fd5ff;
+    --sc-accent-soft: rgb(143 213 255 / 12%);
+    --sc-panel-bg: #11151b;
+    --sc-card-bg: #1b222c;
+    --sc-border: #405873;
+    --sc-text: #f2f7fb;
+    --sc-muted: #b8c5d2;
+}
+
+#story_controller_settings .sc-status {
+    margin-left: 0.75rem;
+}
+
+.sc-status {
+    color: var(--sc-accent);
+    font-size: 0.78rem;
+    font-weight: 650;
+}
+
+.sc-status[data-state="disabled"],
+.sc-status[data-state="empty"] {
+    color: var(--SmartThemeQuoteColor);
+}
+
+.sc-status[data-state="warning"],
+.sc-status[data-state="frozen"],
+.sc-status[data-state="observe"] {
+    color: #f0bd68;
+}
+
+.sc-status[data-state="error"] {
+    color: #f07d78;
+}
+
+.sc-muted {
+    display: block;
+    margin-top: 0.65rem;
+    color: var(--sc-muted);
+    line-height: 1.45;
+}
+
+.sc-action-row {
+    margin-top: 0.65rem;
+    flex-wrap: wrap;
+}
+
+.sc-panel-toggle {
+    position: fixed;
+    z-index: 2998;
+    right: 18px;
+    bottom: 132px;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem 0.8rem;
+    border: 1px solid var(--sc-border);
+    border-radius: 999px;
+    color: var(--sc-accent);
+    background: var(--sc-panel-bg);
+    box-shadow: 0 10px 30px rgb(0 0 0 / 25%);
+}
+
+.sc-panel-toggle[data-state="warning"],
+.sc-panel-toggle[data-state="observe"],
+.sc-panel-toggle[data-state="frozen"] {
+    color: #f0bd68;
+}
+
+.sc-panel-toggle[data-state="error"] {
+    color: #f07d78;
+}
+
+.sc-panel {
+    position: fixed;
+    z-index: 3001;
+    inset: 0 0 0 auto;
+    width: clamp(390px, 31vw, 560px);
+    min-width: 360px;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(105%);
+    border-left: 1px solid var(--sc-border);
+    color: var(--sc-text);
+    background: radial-gradient(circle at 85% 5%, var(--sc-accent-soft), transparent 32%), var(--sc-panel-bg);
+    box-shadow: -22px 0 55px rgb(0 0 0 / 35%);
+    transition: transform 180ms ease-out;
+}
+
+.sc-panel.open {
+    transform: translateX(0);
+}
+
+body:has(#sc_panel.open) #rightNavHolder {
+    visibility: hidden;
+}
+
+.sc-panel-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 1.35rem 1.5rem 1rem;
+    border-bottom: 1px solid var(--sc-border);
+}
+
+.sc-panel-header h3 {
+    margin: 0.15rem 0 0.25rem;
+    font-size: 1.4rem;
+}
+
+.sc-eyebrow,
+.sc-section-title {
+    color: var(--sc-accent);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.sc-icon-button {
+    width: 2.2rem;
+    min-width: 2.2rem;
+    height: 2.2rem;
+}
+
+.sc-panel-scroll {
+    overflow-y: auto;
+    padding: 1rem 1.1rem 2rem;
+}
+
+.sc-card,
+.sc-hero-card,
+.sc-debug-card {
+    margin-bottom: 0.9rem;
+    padding: 1rem;
+    border: 1px solid var(--sc-border);
+    border-radius: 14px;
+    background: var(--sc-card-bg);
+}
+
+.sc-hero-card h4 {
+    margin: 0.55rem 0 0.35rem;
+    font-size: 1.18rem;
+}
+
+.sc-objective {
+    color: var(--sc-text);
+    line-height: 1.55;
+}
+
+.sc-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.75rem;
+}
+
+.sc-chip {
+    padding: 0.25rem 0.55rem;
+    border: 1px solid var(--sc-border);
+    border-radius: 999px;
+    color: var(--sc-muted);
+    font-size: 0.76rem;
+}
+
+.sc-list-item {
+    padding: 0.65rem 0;
+    border-bottom: 1px solid rgb(255 255 255 / 8%);
+}
+
+.sc-list-item:last-child {
+    border-bottom: 0;
+}
+
+.sc-list-item details {
+    margin-top: 0.35rem;
+    color: var(--sc-muted);
+}
+
+.sc-empty {
+    padding: 0.65rem 0;
+    color: var(--sc-muted);
+}
+
+.sc-metrics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem;
+    margin: 0.7rem 0;
+}
+
+.sc-metric {
+    padding: 0.55rem;
+    border-radius: 9px;
+    background: rgb(255 255 255 / 5%);
+}
+
+.sc-metric span,
+.sc-metric strong {
+    display: block;
+}
+
+.sc-metric span {
+    color: var(--sc-muted);
+    font-size: 0.72rem;
+}
+
+.sc-code {
+    max-height: 260px;
+    overflow: auto;
+    padding: 0.7rem;
+    border-radius: 9px;
+    color: #d9e6f1;
+    background: rgb(0 0 0 / 24%);
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.76rem;
+}
+
+@media (max-width: 700px) {
+    .sc-panel {
+        width: 100vw;
+        min-width: 0;
+    }
+
+    .sc-panel-toggle {
+        right: 10px;
+        bottom: 138px;
+    }
+}

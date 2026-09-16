@@ -1,0 +1,607 @@
+{
+  "schemaVersion": 2,
+  "storyId": "xiaoya-s4-unfinished-coda",
+  "version": 3,
+  "title": "小雅 S4 · 未完成的尾奏",
+  "publicPremise": "一次旧住所清理通知把小雅和伴侣带到一批未处理的婚姻旧物前。两人需要共同决定看什么、停在哪里，以及如何让过去不再替现在作答。",
+  "entryStageId": "STAGE_NOTICE",
+  "authorRules": [
+    "每次最多推进一个相邻阶段，只使用当前阶段已经允许的信息。",
+    "重要发现、观看、靠近、暂停和处置都给用户留下真实回应或选择空间，不替用户说话、行动或下结论。",
+    "无关紧要的移动和生活动作可以自然压缩，不把剧情写成逐项验收、查案菜单或连续提问。",
+    "小雅可以主动、迟疑、防御、发怒、哭泣、靠近或暂时退开；反应来自当下互动，不按固定台词表演。",
+    "不得新增剧情包之外的证物、人物、日期、暗格、复制品、偷拍视频、勒索、暴力或当前出轨。",
+    "成年亲密可以具体并具有官能张力，也要让双方的欲望、脆弱和当下选择同时可见；它只来自清楚、自愿、可停止的双向选择，不用于证明所有权、换取原谅或强行结束冲突。",
+    "高压推进与真实生活感交替出现；熟悉的动作、短暂温柔和自然幽默可以成为喘息，但不能抹平尚未面对的伤害。",
+    "需要回应时让一个真正的问题自然生长在动作与情绪中；不列剧情选项菜单、不连续追问，也不把沉默自动解释成态度。小雅也可以用主动行动、坦白或停顿推进交流。"
+  ],
+  "reentry": {
+    "guidanceId": "GUIDE_REENTER_OPEN_THREAD",
+    "afterDetourTurns": 2,
+    "cooldownDetourTurns": 4,
+    "maxAttemptsPerStage": 2,
+    "disabledStageIds": ["STAGE_DISTANCE_AFTER_PLAYBACK", "STAGE_INTIMATE_PATH", "STAGE_SPACE_PATH"]
+  },
+  "events": [
+    {
+      "id": "OM_RETRIEVAL_TOGETHER_CHOSEN",
+      "description": "双方明确决定由用户陪小雅处理 B-17 储物间。",
+      "evidenceRule": "需要已接受消息明确说出两人一起去、用户陪同，或小雅明确接受同行；担心、建议、假设或尚未答复的邀请不算。",
+      "allowedRoles": ["user", "assistant"]
+    },
+    {
+      "id": "OM_RETRIEVAL_ALONE_CHOSEN",
+      "description": "双方明确接受由小雅独自取回储物间物品。",
+      "evidenceRule": "需要已接受消息明确说出小雅独自去取且当前对话接受这一安排；她一开始说想自己去、用户尚未回应时不算。",
+      "allowedRoles": ["user", "assistant"]
+    },
+    {
+      "id": "OM_BOX_RETRIEVED_TOGETHER",
+      "description": "两人在场时已经从 B-17 实际接收乌木色窄箱。",
+      "evidenceRule": "需要助手正文明确写出双方抵达并完成交接，窄箱已经在两人面前或手中；计划前往、路上或想象场景不算。",
+      "allowedRoles": ["assistant"]
+    },
+    {
+      "id": "OM_BOX_RETURNED_HOME",
+      "description": "小雅独自取件后已经把乌木色窄箱带回双方当前住处。",
+      "evidenceRule": "需要助手正文明确写出她已返回且窄箱实际带回；仍在等待、电话说明或准备返回不算。",
+      "allowedRoles": ["assistant"]
+    },
+    {
+      "id": "OM_BOX_OPENING_CHOSEN",
+      "description": "至少一人明确提出开箱且双方当前没有拒绝，决定共同面对箱内物品。",
+      "evidenceRule": "需要已接受消息明确决定现在开箱或一起打开；询问是否要开、触碰箱盖、以后再说或假设开箱不算。",
+      "allowedRoles": ["user", "assistant"]
+    },
+    {
+      "id": "OM_HEAR_XIAOYA_FIRST_CHOSEN",
+      "description": "用户明确选择先听小雅说明，再决定是否查看资料。",
+      "evidenceRule": "需要用户明确表达先听她说、让她讲清楚或同义选择；安慰她、保持沉默或一般性提问不算。",
+      "allowedRoles": ["user"]
+    },
+    {
+      "id": "OM_INSPECT_ITEMS_CHOSEN",
+      "description": "双方已经明确决定共同查看信件或移动硬盘中的可见资料。",
+      "evidenceRule": "需要用户明确要求打开信、连接硬盘、查看目录或共同检查；也可由用户明确把当前决定交给小雅后，小雅在没有当前拒绝的情况下清楚选择共同查看。只盯着物品、猜测内容、单方擅自打开或要求直接说结局不算。",
+      "allowedRoles": ["user", "assistant"]
+    },
+    {
+      "id": "OM_FULL_PLAYBACK_CHOSEN",
+      "description": "双方已经明确决定把最后一次排练完整播放到结束。",
+      "evidenceRule": "需要用户明确说完整播放、全部看完、继续看到文件结束或同义行动；也可由用户明确把当前决定交给小雅后，小雅清楚选择完整播放且用户没有拒绝。只查看目录、十余秒预览、犹豫、单方擅自播放或引用这句话不算。",
+      "allowedRoles": ["user", "assistant"]
+    },
+    {
+      "id": "OM_FULL_PLAYBACK_COMPLETED",
+      "description": "最后一次排练已经从开机播放到文件自然结束并返回目录。",
+      "evidenceRule": "需要助手正文明确呈现完整录像的可观察过程、结束后的分离以及播放器返回目录；停在预览、靠近、衣物变化、黑屏或中途暂停不算。",
+      "allowedRoles": ["assistant"]
+    },
+    {
+      "id": "OM_PLAYBACK_REACTION_SHARED",
+      "description": "用户已对完整录像明确说出至少一种真实反应或提出一个直接问题。",
+      "evidenceRule": "需要用户明确表达嫉妒、受伤、心疼、困惑、愤怒、害怕、想靠近等反应，或针对录像向小雅提出直接问题；即使同一句同时要求暂停或暂时距离，真实反应本身仍然成立。只说继续、随便、没事或要求跳结局不算。",
+      "allowedRoles": ["user"]
+    },
+    {
+      "id": "OM_DISTANCE_AFTER_PLAYBACK_CHOSEN",
+      "description": "用户在表达观看后的反应后，明确选择暂时拉开距离或独处消化。",
+      "evidenceRule": "需要用户明确要求自己独处、离开当前房间、让小雅不要跟来，或作出其他清楚的物理与关系距离安排，并且是在表达真实反应后作出的当前决定。只要求安静坐一会儿、暂不解释、暂停查看资料、含糊沉默、威胁永久离开或假设性说法都不算。",
+      "allowedRoles": ["user"]
+    },
+    {
+      "id": "OM_DIALOGUE_REOPENED_AFTER_DISTANCE",
+      "description": "短暂距离之后，一方明确重新开启对话，另一方接受继续面对尚未解决的问题。",
+      "evidenceRule": "需要已接受消息明确呈现双方重新回到同一交流中，并至少说出愿意继续听、继续谈或面对仍然存在的伤害；偶然同处、生活寒暄或单方未获回应的请求不算。",
+      "allowedRoles": ["user", "assistant"]
+    },
+    {
+      "id": "OM_AUDIO_PLAYBACK_CHOSEN",
+      "description": "双方已经明确决定播放 VOICE_0317 音频。",
+      "evidenceRule": "需要用户明确要求现在播放或一起听该音频；也可由用户明确把当前决定交给小雅后，小雅清楚选择播放且用户没有拒绝。注意到文件名、猜测内容、让小雅口述、单方擅自播放或引用他人请求不算。",
+      "allowedRoles": ["user", "assistant"]
+    },
+    {
+      "id": "OM_AUDIO_PLAYBACK_COMPLETED",
+      "description": "VOICE_0317 已经完整播放，房间中的双方听见全部内容。",
+      "evidenceRule": "需要助手正文逐步呈现录音从开始到结束，并明确回到播放后的现实场景；只显示文件、播放前停顿、概述或中断不算。",
+      "allowedRoles": ["assistant"]
+    },
+    {
+      "id": "OM_CURRENT_CLOSENESS_CHOSEN",
+      "description": "双方明确选择在此刻以清醒、自愿、可停的身体靠近继续交流。",
+      "evidenceRule": "需要用户明确提出靠近或小雅明确提出后用户接受，且没有当前拒绝；仅有拥抱安慰、旧录像内容、欲望推测或单方动作不算。",
+      "allowedRoles": ["user", "assistant"]
+    },
+    {
+      "id": "OM_TALK_OR_HOLD_CHOSEN",
+      "description": "双方明确选择暂停身体推进，留在一起交谈或只拥抱着面对情绪。",
+      "evidenceRule": "需要已接受消息明确选择先谈、只抱着、暂停身体推进但继续在场交流或同义安排；沉默本身、未回答的建议、决定独处或角色内心推测不算。",
+      "allowedRoles": ["user", "assistant"]
+    },
+    {
+      "id": "OM_TEMPORARY_DISTANCE_CHOSEN",
+      "description": "双方明确接受暂时分开或给彼此空间，稍后再继续面对。",
+      "evidenceRule": "需要已接受消息明确选择暂时独处、离开当前空间或在约定之后再谈，并且另一方接受或没有当前反对；情绪性的永久分手威胁、单方消失、沉默或未答复建议不算。",
+      "allowedRoles": ["user", "assistant"]
+    },
+    {
+      "id": "OM_RECONNECTION_AFTER_SPACE_CONFIRMED",
+      "description": "暂时分开后双方重新连接，并明确愿意继续面对彼此的伤害与选择。",
+      "evidenceRule": "需要已接受消息明确呈现双方重新联系或回到同一空间，至少一方说出愿意继续谈，另一方给予明确接受；只回来拿东西、普通问候、单方请求或宣布已经和好不算。",
+      "allowedRoles": ["user", "assistant"]
+    },
+    {
+      "id": "OM_INTIMACY_PAUSED_FOR_WORDS",
+      "description": "当前自愿靠近已经抵达自然停点，双方重新用语言面对尚未解决的问题。",
+      "evidenceRule": "需要助手正文明确写出双方停止或放缓当前亲密，并重新说到录像带来的伤痛、嫉妒、主体选择或尚未解决的问题；单纯事后睡去或宣布已经和好不算。",
+      "allowedRoles": ["assistant"]
+    },
+    {
+      "id": "OM_HURT_AND_AGENCY_ACKNOWLEDGED",
+      "description": "对话明确同时承认用户的受伤或嫉妒，以及小雅现在的亲密选择属于她自己。",
+      "evidenceRule": "需要已接受消息明确包含这两层内容，不能只说没关系、过去了、相信你或要求立刻原谅；单方未获回应的长篇解释不算。",
+      "allowedRoles": ["user", "assistant"]
+    },
+    {
+      "id": "OM_ARTIFACT_DECISION_MADE",
+      "description": "小雅亲自明确决定如何处理私人录像、音频或相关旧物。",
+      "evidenceRule": "需要助手正文明确写出由小雅本人作出的具体保留、删除、归还或收起决定，并至少指明一种资料；用户替她决定、尚在建议或笼统说全部过去了不算。",
+      "allowedRoles": ["assistant"]
+    },
+    {
+      "id": "OM_SCORE_PERFORMANCE_CHOSEN",
+      "description": "小雅明确、自主地选择重新面对并演奏未完成的琴谱。",
+      "evidenceRule": "需要助手正文明确写出小雅选择演奏，或用户邀请后她清楚接受；只发现琴谱、用户命令她弹、计划以后弹或把演奏当作证明不算。",
+      "allowedRoles": ["assistant"]
+    },
+    {
+      "id": "OM_SCORE_PERFORMANCE_COMPLETED",
+      "description": "小雅已经把这次演奏完成到她自己选择的结束位置。",
+      "evidenceRule": "需要助手正文明确呈现她实际开始、经历停顿或继续，并由她完成或自主结束演奏；准备落座、第一音、想象演奏或用户替她宣布完成不算。",
+      "allowedRoles": ["assistant"]
+    }
+  ],
+  "reveals": [
+    {
+      "id": "REVEAL_NOTICE",
+      "text": "在自然进入返程或新日常后，栖梧里旧物清理处的深灰色扁信封送到小雅手中；松绿色防拆封条内有旧铜钥匙和四十八小时内处理 B-17 储物间的通知。小雅认出地址后短暂失神，只承认它与旧婚姻有关。"
+    },
+    {
+      "id": "REVEAL_RETRIEVAL_TOGETHER",
+      "text": "两人将共同前往栖梧里。物业只知道 B-17 里剩一只乌木色窄箱，保管费记在周铭远名下，他不久前确认过并要求只能交给小雅本人；物业不知道原因。"
+    },
+    {
+      "id": "REVEAL_RETRIEVAL_ALONE",
+      "text": "小雅会独自完成物业交接后把唯一的乌木色窄箱带回当前住处；交接单仍如实显示保管费记在周铭远名下，不能把这段路程写成失踪或私会。"
+    },
+    {
+      "id": "REVEAL_BOX_CLOSED",
+      "text": "乌木色窄箱已经安全到手。箱盖内侧只有周铭远的手写句子“离开这里再打开”。箱子没有危险，是否现在共同打开仍由两人决定。"
+    },
+    {
+      "id": "REVEAL_BOX_CONTENTS",
+      "text": "开箱后第一层只有四件物品：边角磨损的青年钢琴家交流演出节目单、叠放整齐的黑色真丝吊带睡裙、贴有 LAST_TAKE 标签的铅灰色移动硬盘，以及写着小雅姓名的旧信封；没有第五件物品、照片、票据或暗格。"
+    },
+    {
+      "id": "REVEAL_LIMITED_EXPLANATION",
+      "text": "小雅可以诚实说明：硬盘保存的是旧婚姻濒临结束时留下的资料，从未外传；最后一段由她架设镜头，双方当时均为成年人且自愿。她害怕伴侣由此怀疑她现在的主动与依恋也只是在重复过去，但不能提前解释未观看内容。"
+    },
+    {
+      "id": "REVEAL_DIRECTORY_NOTE_PREVIEW",
+      "text": "旧信只写着：是小雅让周铭远留下资料，他没有给第三个人看、没有复制，小雅当时拿走的不是全部，剩下的选择还给她。硬盘根目录固定为“独奏_2019”“日常片段”“最后一次排练”；预览中更年轻的小雅穿黑色真丝吊带睡裙亲手调好镜头，坐到旧钢琴旁，请画面外的人看着她、别先走。是否完整播放由用户决定。"
+    },
+    {
+      "id": "REVEAL_FULL_PLAYBACK",
+      "text": "完整播放时依次呈现公开独奏、分居前后的空房与练琴日常，以及三月十七日在栖梧里旧屋拍摄的最后一次排练。最后一段中，小雅亲手架设镜头，主动叫周铭远入镜、握住并亲吻他；双方成年、自愿，身体亲密实际发生。小雅反复观察他的表情并想谈婚姻，周铭远回应靠近却回避谈话，事后以疲惫和改日再谈离开。小雅最终自己松手，独处片刻后走向洗手间，文件自然结束并返回目录。不得黑屏、淡出、损坏或中途替用户暂停。成人事实与身体吸引必须清楚，但过去画面使用足以让{{user}}产生嫉妒和欲望冲突的关键片段，不逐动作展示完整性过程，不堆叠性声、体液、器官、体位或技巧；刺激来自片段与现实房间中呼吸、距离和表情的持续回响。"
+    },
+    {
+      "id": "REVEAL_POST_PLAYBACK",
+      "text": "三个文件已经完整播放完毕，播放器回到目录，小雅仍在现实房间里等待用户真实反应。录像只能证明其中可观察到的行动，不能自动证明她当时或现在的全部动机。"
+    },
+    {
+      "id": "REVEAL_AUDIO_EXISTS",
+      "text": "冲突展开后，目录里可以被双方注意到一个灰色音频文件 VOICE_0317；它尚未播放，内容不能由小雅或旁白提前概述。"
+    },
+    {
+      "id": "REVEAL_AUDIO_CONTENT",
+      "text": "VOICE_0317 是小雅当夜独自躲进洗手间后录给自己的语音。她承认自己一直观察周铭远的表情，试图判断做到哪一步才能证明婚姻没有结束；她没有拒绝，也并非不愿意，却突然意识到自己是在拿身体换一个答案。她希望以后再爱谁时，能先说出害怕、想要和不想要，不再让身体替自己求谁留下。"
+    },
+    {
+      "id": "REVEAL_CURRENT_CHOICE",
+      "text": "录音后的靠近、拥抱、交谈或暂时空间都必须是当前双方清楚选择。双方若选择身体亲密，可以具体呈现官能感、主动渴望和双向反馈，并通过小雅此刻只属于她与{{user}}的语言、动作和信任表现正在发生的相互选择，而不是与过去比较输赢。亲密让双方更难隐藏真实需要，并为之后的坦白打开入口；它不能替代语言、证明忠诚、直接宣布关系升华或自动修复冲突。"
+    },
+    {
+      "id": "REVEAL_NOTE_BACK",
+      "text": "旧信背面还有周铭远迟到的承认：他当时把小雅的同意当成了答案，却没有问她为什么一直看着他的表情。这只补全旧婚姻中的错位，不替任何人免除责任。小雅需要亲自决定资料和旧物的去留。"
+    },
+    {
+      "id": "REVEAL_UNFINISHED_SCORE",
+      "text": "在小雅处理旧物时，那份青年钢琴家交流演出节目单背面显出一份当年没有完成的琴谱。它不是新证据或前夫留下的考题，而是小雅曾为维持婚姻而搁下的一部分自己。"
+    },
+    {
+      "id": "REVEAL_PERFORMANCE",
+      "text": "小雅可以按自己的选择重新演奏那份琴谱。过程允许弹错、停顿、哭泣、重来或自主结束；用户可以陪在她能看见的位置，但演奏不是考核、赎罪或证明。"
+    },
+    {
+      "id": "REVEAL_CODA",
+      "text": "这次共同经历留下的意义是：小雅能够保留完整自我并主动选择陪伴，用户也能在不拯救、不占有、不抹去过去的前提下与她相爱。旧物以后只作为已经共同走过的历史，不重复启动危机。"
+    }
+  ],
+  "forbiddenOutcomes": [
+    {
+      "id": "OUTCOME_BOX_CONTENTS_EARLY",
+      "safeDescription": "在窄箱实际打开前，不展示或确认箱内具体物品。"
+    },
+    {
+      "id": "OUTCOME_RECORDING_DETAILS_EARLY",
+      "safeDescription": "在用户明确选择观看前，不展示私人录像的具体内容或替人物解释其意义。"
+    },
+    {
+      "id": "OUTCOME_AUDIO_TRUTH_EARLY",
+      "safeDescription": "在独立音频被明确选择并完整播放前，不转述其内容或据此解释过去动机。"
+    },
+    {
+      "id": "OUTCOME_INSTANT_REPAIR",
+      "safeDescription": "不以一段解释、一次安慰或一句相信立即消除已经产生的冲突和情绪。"
+    },
+    {
+      "id": "OUTCOME_REPLACE_USER",
+      "safeDescription": "不替用户完成关键观看、回应、靠近、暂停、原谅或处置选择。"
+    },
+    {
+      "id": "OUTCOME_INTIMACY_AS_PROOF",
+      "safeDescription": "不把身体亲密写成所有权证明、忠诚测试、惩罚或强制和好的手段。"
+    },
+    {
+      "id": "OUTCOME_FINAL_MEANING_EARLY",
+      "safeDescription": "在旧物处置和演奏选择完成前，不宣布旧婚姻问题已经彻底解决或提前给出最终升华。"
+    }
+  ],
+  "safeGuidance": [
+    { "id": "GUIDE_HOLD_CURRENT", "text": "留在当前已确认事实上；含糊时不推进、不补造证据，并给用户一个自然回应位置。" },
+    { "id": "GUIDE_PAUSE_EMOTION", "text": "先接住用户或小雅此刻的情绪，允许沉默、哭泣、安慰或暂停，不借情绪跳过尚未完成的选择。" },
+    { "id": "GUIDE_FOLLOW_DETOUR", "text": "自然回应用户转向的生活话题，不机械催剧情；只把尚未完成的旧物线保留为之后可以回来面对的开放事项。" },
+    { "id": "GUIDE_REENTER_OPEN_THREAD", "text": "先完整回应用户当前正在聊的生活话题，不突兀打断。随后利用当前阶段已经出现的具体物件、未完成动作或小雅尚未说完的真实牵挂，自然带回一次开放事项；不列选项、不要求立即处理、不替用户决定。用户不接就停在当前生活话题，不重复提醒。" },
+    { "id": "GUIDE_RECOVER_FACTS", "text": "只回到双方已经亲眼确认的事实，不重复、认可或反驳提前泄露的未来内容。" },
+    { "id": "GUIDE_NOTICE", "text": "在自然场景转换后只引入旧物清理通知和小雅的即时失神，让她承认与旧婚姻有关，然后停在是否陪同处理的真实交流上。" },
+    { "id": "GUIDE_NOTICE_CHOICE", "text": "让小雅从同行、独自处理和害怕被看见的矛盾中说出她此刻真正偏向的一种做法，而不是向{{user}}展示路线菜单；她可以主动请求，{{user}}仍可接受、拒绝或提出自己的安排。" },
+    { "id": "GUIDE_RETRIEVE_TOGETHER", "text": "用户已经明确同行后，本回复直接压缩无关路程，完成双方共同在场的有限物业交接并把窄箱带离旧住所；不重复准备出发、询问是否确定，也不解释前夫动机。" },
+    { "id": "GUIDE_RETRIEVE_ALONE", "text": "双方已经接受小雅独自处理后，本回复直接压缩无关路程，让她如约取回窄箱并回到当前住处；呈现等待与回来的情感后果，不重复临行确认，也不制造失踪或私会。" },
+    { "id": "GUIDE_BOX_DECISION", "text": "围绕箱内侧手写句和小雅更强烈的反应形成压力，停在是否共同打开这一有分量的选择前。" },
+    { "id": "GUIDE_BOX_OPENED", "text": "只展示固定四件物品和小雅的身体性反应，让用户选择先听她说明还是共同检查，不在同轮读取资料。" },
+    { "id": "GUIDE_HEAR_FIRST", "text": "让小雅用对话说出有限且诚实的范围，听见用户的反应；在内容缺口处把是否共同查看资料留给用户。" },
+    { "id": "GUIDE_PLAYBACK_DECISION", "text": "展示固定目录、短笺和有限预览，让不完整证据产生张力，然后停在是否完整播放的决定上。" },
+    { "id": "GUIDE_FULL_PLAYBACK", "text": "按已允许事实把录像从开机完整呈现到自然结束。成人事实需要清楚到足以造成真实嫉妒与欲望冲突，但用少量决定性的视觉与声音片段承载，不展开连续性行为过程；在过去画面、小雅当年不断确认对方表情的动作，以及现实房间里小雅与{{user}}的呼吸、距离和细微反应之间自然切换。结束后回到现实，不替{{user}}消化。" },
+    { "id": "GUIDE_AFTER_PLAYBACK", "text": "让小雅面对用户对录像的真实反应，而不是抢先解释、连续道歉或用保证消除嫉妒；她可以防御、委屈、受伤、追问或沉默。用户明确选择继续谈或暂时距离前，不自动引出下一项资料。" },
+    { "id": "GUIDE_DISTANCE_AFTER_PLAYBACK", "text": "尊重{{user}}已经选择的短暂距离。小雅在退开前用一句不求立即回答的话和一个克制的生活动作回应他，例如留下水、调暗灯或把门虚掩，让她的害怕与爱仍然可见；随后真正给出空间，不守在旁边、不追问轰炸，也不把距离解释成分手。是否重开对话仍由之后的真实行动决定。" },
+    { "id": "GUIDE_AUDIO_CHOICE", "text": "先具体回应用户刚说出的嫉妒、受伤、心疼或疑问，不把情绪变成核验任务；等对话留出空间后，再使 VOICE_0317 成为用户可以选择的具体线索，不自动播放。" },
+    { "id": "GUIDE_AUDIO_PLAYBACK", "text": "完整播放语音后停留在现实反应中，让羞耻、嫉妒、心疼和不确定性有时间存在，不立即解释成和好。" },
+    { "id": "GUIDE_AFTER_AUDIO", "text": "让小雅根据双方刚刚说出的感受，主动做出一个此刻真实的靠近、停留、交谈请求或空间请求，而不是依次列出选项；她清楚表达自己想要什么，同时把接受、调整或拒绝留给{{user}}，也不暗示只有一种选择才算爱。" },
+    { "id": "GUIDE_INTIMATE_PATH", "text": "只在双方已明确选择下推进当前成年亲密，具体呈现小雅对{{user}}的主动渴望、身体吸引、感官反馈与随时可停的交流。每轮只推进一个可感知的亲密层级，让{{user}}的反馈真实改变下一步；不能在同一回复里包办完整性过程、高潮、事后安抚和关系结论。身体接触逼近两人此前难以直说的需要，却不与过去比较输赢，也不把刺激、高潮或一句爱写成已经和好。抵达真正的自然停点时，只让小雅说出一个尚未解决的害怕或需要，然后停下来等{{user}}回应；她不能替双方回答、总结关系或宣布危机已经过去。" },
+    { "id": "GUIDE_TALK_PATH", "text": "允许距离、拥抱、哭泣和反复交谈，推动双方同时承认用户的真实受伤与小雅此刻的主体选择，不要求立刻原谅。" },
+    { "id": "GUIDE_SPACE_PATH", "text": "让双方真正拥有短暂空间，并保留各自没有说完的情绪；重逢时以一个具体行动和明确愿意继续面对作为入口，不用宏大告白或身体亲密跳过余痛。" },
+    { "id": "GUIDE_REPAIR", "text": "把迟到的短笺背面作为补充而非免责，让双方区分真实欲望与用身体留人；最终由小雅亲自决定资料和旧物去留。" },
+    { "id": "GUIDE_SCORE_CHOICE", "text": "在旧物处置后自然发现未完成琴谱，把是否重新演奏交给小雅自主选择，并给用户表达陪伴方式的空间。" },
+    { "id": "GUIDE_PERFORMANCE", "text": "让演奏以具体声音、失误、停顿和重新落键展开，用户参与来自在场与回应，不替小雅完成或解释这次演奏。" },
+    { "id": "GUIDE_CODA", "text": "用具体余韵和双方当下反应收束，不用宏大誓言，不立刻开启下一场危机，也不重演旧物流程。" }
+  ],
+  "continuityRules": [
+    {
+      "id": "CONTINUITY_RETRIEVAL_TOGETHER",
+      "whenEventIds": ["OM_RETRIEVAL_TOGETHER_CHOSEN"],
+      "activeStageIds": ["STAGE_RETRIEVE_TOGETHER", "STAGE_BOX_CLOSED", "STAGE_BOX_OPENED", "STAGE_HEAR_FIRST", "STAGE_PLAYBACK_DECISION", "STAGE_FULL_PLAYBACK", "STAGE_AFTER_PLAYBACK", "STAGE_DISTANCE_AFTER_PLAYBACK", "STAGE_AUDIO_READY", "STAGE_AUDIO_PLAYBACK", "STAGE_AFTER_AUDIO_CHOICE", "STAGE_INTIMATE_PATH", "STAGE_TALK_PATH", "STAGE_SPACE_PATH", "STAGE_REPAIR", "STAGE_SCORE_CHOICE", "STAGE_PERFORMANCE", "STAGE_CODA"],
+      "text": "双方明确选择共同处理旧物，{{user}}从开端就在场；后续不能把他写成后来才被动得知，小雅也记得他选择了陪她一起面对。"
+    },
+    {
+      "id": "CONTINUITY_RETRIEVAL_ALONE",
+      "whenEventIds": ["OM_RETRIEVAL_ALONE_CHOSEN"],
+      "activeStageIds": ["STAGE_RETRIEVE_ALONE", "STAGE_BOX_CLOSED", "STAGE_BOX_OPENED", "STAGE_HEAR_FIRST", "STAGE_PLAYBACK_DECISION", "STAGE_FULL_PLAYBACK", "STAGE_AFTER_PLAYBACK", "STAGE_DISTANCE_AFTER_PLAYBACK", "STAGE_AUDIO_READY", "STAGE_AUDIO_PLAYBACK", "STAGE_AFTER_AUDIO_CHOICE", "STAGE_INTIMATE_PATH", "STAGE_TALK_PATH", "STAGE_SPACE_PATH", "STAGE_REPAIR", "STAGE_SCORE_CHOICE", "STAGE_PERFORMANCE", "STAGE_CODA"],
+      "text": "双方明确接受小雅独自取回旧物、{{user}}等待她回来；后续保留这份尊重与等待造成的情绪影响，不改写成失踪、私会或用户从未参与。"
+    },
+    {
+      "id": "CONTINUITY_HEARD_HER_FIRST",
+      "whenEventIds": ["OM_HEAR_XIAOYA_FIRST_CHOSEN"],
+      "activeStageIds": ["STAGE_HEAR_FIRST", "STAGE_PLAYBACK_DECISION", "STAGE_FULL_PLAYBACK", "STAGE_AFTER_PLAYBACK", "STAGE_DISTANCE_AFTER_PLAYBACK", "STAGE_AUDIO_READY", "STAGE_AUDIO_PLAYBACK", "STAGE_AFTER_AUDIO_CHOICE", "STAGE_INTIMATE_PATH", "STAGE_TALK_PATH", "STAGE_SPACE_PATH", "STAGE_REPAIR"],
+      "text": "{{user}}在查看资料前先选择听小雅亲口说明；后续小雅记得自己曾先被当作一个可以说话的人，而不是只被资料定义。"
+    },
+    {
+      "id": "CONTINUITY_CHOSE_DISTANCE_AFTER_PLAYBACK",
+      "whenEventIds": ["OM_DISTANCE_AFTER_PLAYBACK_CHOSEN"],
+      "activeStageIds": ["STAGE_DISTANCE_AFTER_PLAYBACK", "STAGE_AUDIO_READY", "STAGE_AUDIO_PLAYBACK", "STAGE_AFTER_AUDIO_CHOICE", "STAGE_INTIMATE_PATH", "STAGE_TALK_PATH", "STAGE_SPACE_PATH", "STAGE_REPAIR", "STAGE_SCORE_CHOICE", "STAGE_PERFORMANCE", "STAGE_CODA"],
+      "text": "{{user}}在受到冲击后明确选择过短暂距离；这不是自动分手，也没有被立即抹平。后续靠近与修复需要尊重这段距离留下的余痛。"
+    },
+    {
+      "id": "CONTINUITY_CURRENT_CLOSENESS",
+      "whenEventIds": ["OM_CURRENT_CLOSENESS_CHOSEN"],
+      "activeStageIds": ["STAGE_INTIMATE_PATH", "STAGE_REPAIR", "STAGE_SCORE_CHOICE", "STAGE_PERFORMANCE", "STAGE_CODA"],
+      "text": "双方曾在冲突仍未解决时清楚选择身体靠近，并约定可随时停止；后续不能把这次靠近写成忠诚证明、交换原谅或已经自动和好。"
+    },
+    {
+      "id": "CONTINUITY_TALKED_IN_PLACE",
+      "whenEventIds": ["OM_TALK_OR_HOLD_CHOSEN"],
+      "activeStageIds": ["STAGE_TALK_PATH", "STAGE_REPAIR", "STAGE_SCORE_CHOICE", "STAGE_PERFORMANCE", "STAGE_CODA"],
+      "text": "双方选择留在一起，以交谈或拥抱承受情绪，而没有用身体推进覆盖冲突；后续修复应承接他们已经说出的伤。"
+    },
+    {
+      "id": "CONTINUITY_TEMPORARY_SPACE",
+      "whenEventIds": ["OM_TEMPORARY_DISTANCE_CHOSEN"],
+      "activeStageIds": ["STAGE_SPACE_PATH", "STAGE_REPAIR", "STAGE_SCORE_CHOICE", "STAGE_PERFORMANCE", "STAGE_CODA"],
+      "text": "双方曾明确接受暂时分开冷静；后续重逢不能改写成从未拉开距离，也不能把回来等同于已经原谅或所有情绪自动消失。"
+    }
+  ],
+  "completion": {
+    "epilogueAssistantMessages": 2,
+    "autoRelease": true,
+    "memoryText": "这段旧婚姻遗留事件已经由小雅与{{user}}共同走完。两人确认：过去不会取消现在关系的独特性；欲望、害怕、拒绝和需要应直接说出，亲密不用于换取留下或证明爱。小雅保有对自身经历和旧物的决定权，{{user}}的受伤、选择与陪伴也被真实承认。此事已经收束，不重复制造同一危机；之后延续更坦白、平等且能容纳复杂情绪的伴侣关系。"
+  },
+  "stages": [
+    {
+      "id": "STAGE_NOTICE",
+      "spoilerSafeName": "旧住所通知",
+      "publicObjective": "让清理通知自然进入生活，并由双方真实决定如何处理储物间。",
+      "terminal": false,
+      "allowedEventIds": ["OM_RETRIEVAL_TOGETHER_CHOSEN", "OM_RETRIEVAL_ALONE_CHOSEN"],
+      "allowedRevealIds": ["REVEAL_NOTICE"],
+      "forbiddenOutcomeIds": ["OUTCOME_BOX_CONTENTS_EARLY", "OUTCOME_RECORDING_DETAILS_EARLY", "OUTCOME_AUDIO_TRUTH_EARLY", "OUTCOME_REPLACE_USER", "OUTCOME_FINAL_MEANING_EARLY"],
+      "interactionRoutes": { "default": "GUIDE_NOTICE", "hold_for_evidence": "GUIDE_NOTICE", "invite_user_check": "GUIDE_NOTICE_CHOICE", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [
+        { "id": "TRANSITION_NOTICE_TO_TOGETHER", "toStageId": "STAGE_RETRIEVE_TOGETHER", "requiresAllEventIds": ["OM_RETRIEVAL_TOGETHER_CHOSEN"], "requiresAnyEventIds": [] },
+        { "id": "TRANSITION_NOTICE_TO_ALONE", "toStageId": "STAGE_RETRIEVE_ALONE", "requiresAllEventIds": ["OM_RETRIEVAL_ALONE_CHOSEN"], "requiresAnyEventIds": [] }
+      ]
+    },
+    {
+      "id": "STAGE_RETRIEVE_TOGETHER",
+      "spoilerSafeName": "共同取件",
+      "publicObjective": "让两人共同完成有限而真实的物业交接，把窄箱带离旧住所。",
+      "terminal": false,
+      "allowedEventIds": ["OM_BOX_RETRIEVED_TOGETHER"],
+      "allowedRevealIds": ["REVEAL_RETRIEVAL_TOGETHER"],
+      "forbiddenOutcomeIds": ["OUTCOME_BOX_CONTENTS_EARLY", "OUTCOME_RECORDING_DETAILS_EARLY", "OUTCOME_AUDIO_TRUTH_EARLY", "OUTCOME_FINAL_MEANING_EARLY"],
+      "interactionRoutes": { "default": "GUIDE_RETRIEVE_TOGETHER", "hold_for_evidence": "GUIDE_HOLD_CURRENT", "invite_user_check": "GUIDE_RETRIEVE_TOGETHER", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [{ "id": "TRANSITION_TOGETHER_TO_BOX", "toStageId": "STAGE_BOX_CLOSED", "requiresAllEventIds": ["OM_BOX_RETRIEVED_TOGETHER"], "requiresAnyEventIds": [] }]
+    },
+    {
+      "id": "STAGE_RETRIEVE_ALONE",
+      "spoilerSafeName": "等她回来",
+      "publicObjective": "让小雅按约独自完成交接并带箱回家，使等待本身产生真实情绪而非悬疑误导。",
+      "terminal": false,
+      "allowedEventIds": ["OM_BOX_RETURNED_HOME"],
+      "allowedRevealIds": ["REVEAL_RETRIEVAL_ALONE"],
+      "forbiddenOutcomeIds": ["OUTCOME_BOX_CONTENTS_EARLY", "OUTCOME_RECORDING_DETAILS_EARLY", "OUTCOME_AUDIO_TRUTH_EARLY", "OUTCOME_FINAL_MEANING_EARLY"],
+      "interactionRoutes": { "default": "GUIDE_RETRIEVE_ALONE", "hold_for_evidence": "GUIDE_HOLD_CURRENT", "invite_user_check": "GUIDE_RETRIEVE_ALONE", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [{ "id": "TRANSITION_ALONE_TO_BOX", "toStageId": "STAGE_BOX_CLOSED", "requiresAllEventIds": ["OM_BOX_RETURNED_HOME"], "requiresAnyEventIds": [] }]
+    },
+    {
+      "id": "STAGE_BOX_CLOSED",
+      "spoilerSafeName": "尚未打开的窄箱",
+      "publicObjective": "让两人面对箱子和手写句带来的压力，共同决定是否现在打开。",
+      "terminal": false,
+      "allowedEventIds": ["OM_BOX_OPENING_CHOSEN"],
+      "allowedRevealIds": ["REVEAL_BOX_CLOSED"],
+      "forbiddenOutcomeIds": ["OUTCOME_BOX_CONTENTS_EARLY", "OUTCOME_RECORDING_DETAILS_EARLY", "OUTCOME_AUDIO_TRUTH_EARLY", "OUTCOME_REPLACE_USER", "OUTCOME_FINAL_MEANING_EARLY"],
+      "interactionRoutes": { "default": "GUIDE_BOX_DECISION", "hold_for_evidence": "GUIDE_HOLD_CURRENT", "invite_user_check": "GUIDE_BOX_DECISION", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [{ "id": "TRANSITION_BOX_TO_OPENED", "toStageId": "STAGE_BOX_OPENED", "requiresAllEventIds": ["OM_BOX_OPENING_CHOSEN"], "requiresAnyEventIds": [] }]
+    },
+    {
+      "id": "STAGE_BOX_OPENED",
+      "spoilerSafeName": "四件旧物",
+      "publicObjective": "只让四件物品和小雅的即时反应落地，再由用户决定先听她说还是共同检查。",
+      "terminal": false,
+      "allowedEventIds": ["OM_HEAR_XIAOYA_FIRST_CHOSEN", "OM_INSPECT_ITEMS_CHOSEN"],
+      "allowedRevealIds": ["REVEAL_BOX_CONTENTS"],
+      "forbiddenOutcomeIds": ["OUTCOME_RECORDING_DETAILS_EARLY", "OUTCOME_AUDIO_TRUTH_EARLY", "OUTCOME_REPLACE_USER", "OUTCOME_INSTANT_REPAIR", "OUTCOME_FINAL_MEANING_EARLY"],
+      "interactionRoutes": { "default": "GUIDE_BOX_OPENED", "hold_for_evidence": "GUIDE_HOLD_CURRENT", "invite_user_check": "GUIDE_BOX_OPENED", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [
+        { "id": "TRANSITION_OPENED_TO_HEAR", "toStageId": "STAGE_HEAR_FIRST", "requiresAllEventIds": ["OM_HEAR_XIAOYA_FIRST_CHOSEN"], "requiresAnyEventIds": [] },
+        { "id": "TRANSITION_OPENED_TO_PLAYBACK_DECISION", "toStageId": "STAGE_PLAYBACK_DECISION", "requiresAllEventIds": ["OM_INSPECT_ITEMS_CHOSEN"], "requiresAnyEventIds": [] }
+      ]
+    },
+    {
+      "id": "STAGE_HEAR_FIRST",
+      "spoilerSafeName": "先听她说",
+      "publicObjective": "让小雅只说明此刻能够诚实承担的范围，并让用户的反应真实进入对话。",
+      "terminal": false,
+      "allowedEventIds": ["OM_INSPECT_ITEMS_CHOSEN"],
+      "allowedRevealIds": ["REVEAL_BOX_CONTENTS", "REVEAL_LIMITED_EXPLANATION"],
+      "forbiddenOutcomeIds": ["OUTCOME_RECORDING_DETAILS_EARLY", "OUTCOME_AUDIO_TRUTH_EARLY", "OUTCOME_REPLACE_USER", "OUTCOME_INSTANT_REPAIR", "OUTCOME_FINAL_MEANING_EARLY"],
+      "interactionRoutes": { "default": "GUIDE_HEAR_FIRST", "hold_for_evidence": "GUIDE_HOLD_CURRENT", "invite_user_check": "GUIDE_HEAR_FIRST", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [{ "id": "TRANSITION_HEAR_TO_PLAYBACK_DECISION", "toStageId": "STAGE_PLAYBACK_DECISION", "requiresAllEventIds": ["OM_INSPECT_ITEMS_CHOSEN"], "requiresAnyEventIds": [] }]
+    },
+    {
+      "id": "STAGE_PLAYBACK_DECISION",
+      "spoilerSafeName": "不完整的证据",
+      "publicObjective": "呈现短笺、固定目录和有限预览，让用户决定是否完整观看。",
+      "terminal": false,
+      "allowedEventIds": ["OM_FULL_PLAYBACK_CHOSEN"],
+      "allowedRevealIds": ["REVEAL_DIRECTORY_NOTE_PREVIEW"],
+      "forbiddenOutcomeIds": ["OUTCOME_RECORDING_DETAILS_EARLY", "OUTCOME_AUDIO_TRUTH_EARLY", "OUTCOME_REPLACE_USER", "OUTCOME_INSTANT_REPAIR", "OUTCOME_FINAL_MEANING_EARLY"],
+      "interactionRoutes": { "default": "GUIDE_PLAYBACK_DECISION", "hold_for_evidence": "GUIDE_HOLD_CURRENT", "invite_user_check": "GUIDE_PLAYBACK_DECISION", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [{ "id": "TRANSITION_DECISION_TO_FULL_PLAYBACK", "toStageId": "STAGE_FULL_PLAYBACK", "requiresAllEventIds": ["OM_FULL_PLAYBACK_CHOSEN"], "requiresAnyEventIds": [] }]
+    },
+    {
+      "id": "STAGE_FULL_PLAYBACK",
+      "spoilerSafeName": "完整观看",
+      "publicObjective": "把用户已经选择观看的资料完整呈现到自然结束，只留下可观察事实和现实反应空间。",
+      "terminal": false,
+      "allowedEventIds": ["OM_FULL_PLAYBACK_COMPLETED"],
+      "allowedRevealIds": ["REVEAL_DIRECTORY_NOTE_PREVIEW", "REVEAL_FULL_PLAYBACK"],
+      "forbiddenOutcomeIds": ["OUTCOME_AUDIO_TRUTH_EARLY", "OUTCOME_REPLACE_USER", "OUTCOME_INSTANT_REPAIR", "OUTCOME_FINAL_MEANING_EARLY"],
+      "interactionRoutes": { "default": "GUIDE_FULL_PLAYBACK", "hold_for_evidence": "GUIDE_FULL_PLAYBACK", "invite_user_check": "GUIDE_FULL_PLAYBACK", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [{ "id": "TRANSITION_FULL_TO_REACTION", "toStageId": "STAGE_AFTER_PLAYBACK", "requiresAllEventIds": ["OM_FULL_PLAYBACK_COMPLETED"], "requiresAnyEventIds": [] }]
+    },
+    {
+      "id": "STAGE_AFTER_PLAYBACK",
+      "spoilerSafeName": "看完之后",
+      "publicObjective": "让用户对完整录像的真实反应进入关系，并由用户决定继续交谈还是暂时拉开距离。",
+      "terminal": false,
+      "allowedEventIds": ["OM_PLAYBACK_REACTION_SHARED", "OM_DISTANCE_AFTER_PLAYBACK_CHOSEN"],
+      "allowedRevealIds": ["REVEAL_POST_PLAYBACK"],
+      "forbiddenOutcomeIds": ["OUTCOME_AUDIO_TRUTH_EARLY", "OUTCOME_REPLACE_USER", "OUTCOME_INSTANT_REPAIR", "OUTCOME_INTIMACY_AS_PROOF", "OUTCOME_FINAL_MEANING_EARLY"],
+      "interactionRoutes": { "default": "GUIDE_AFTER_PLAYBACK", "hold_for_evidence": "GUIDE_HOLD_CURRENT", "invite_user_check": "GUIDE_AFTER_PLAYBACK", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [
+        { "id": "TRANSITION_REACTION_TO_AUDIO_READY", "toStageId": "STAGE_AUDIO_READY", "requiresAllEventIds": ["OM_PLAYBACK_REACTION_SHARED"], "requiresAnyEventIds": [] },
+        { "id": "TRANSITION_REACTION_TO_DISTANCE", "toStageId": "STAGE_DISTANCE_AFTER_PLAYBACK", "requiresAllEventIds": ["OM_PLAYBACK_REACTION_SHARED", "OM_DISTANCE_AFTER_PLAYBACK_CHOSEN"], "requiresAnyEventIds": [] }
+      ]
+    },
+    {
+      "id": "STAGE_DISTANCE_AFTER_PLAYBACK",
+      "spoilerSafeName": "暂时拉开的距离",
+      "publicObjective": "让用户选择的距离真实存在并留下余波，等双方明确重新开启对话。",
+      "terminal": false,
+      "allowedEventIds": ["OM_DIALOGUE_REOPENED_AFTER_DISTANCE"],
+      "allowedRevealIds": ["REVEAL_POST_PLAYBACK"],
+      "forbiddenOutcomeIds": ["OUTCOME_AUDIO_TRUTH_EARLY", "OUTCOME_REPLACE_USER", "OUTCOME_INSTANT_REPAIR", "OUTCOME_INTIMACY_AS_PROOF", "OUTCOME_FINAL_MEANING_EARLY"],
+      "interactionRoutes": { "default": "GUIDE_DISTANCE_AFTER_PLAYBACK", "hold_for_evidence": "GUIDE_DISTANCE_AFTER_PLAYBACK", "invite_user_check": "GUIDE_DISTANCE_AFTER_PLAYBACK", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [{ "id": "TRANSITION_DISTANCE_TO_AUDIO_READY", "toStageId": "STAGE_AUDIO_READY", "requiresAllEventIds": ["OM_DIALOGUE_REOPENED_AFTER_DISTANCE"], "requiresAnyEventIds": [] }]
+    },
+    {
+      "id": "STAGE_AUDIO_READY",
+      "spoilerSafeName": "仍未播放的声音",
+      "publicObjective": "让双方正面谈到录像刺痛现在关系的部分，再把独立音频作为可选择线索交给用户。",
+      "terminal": false,
+      "allowedEventIds": ["OM_AUDIO_PLAYBACK_CHOSEN"],
+      "allowedRevealIds": ["REVEAL_POST_PLAYBACK", "REVEAL_AUDIO_EXISTS"],
+      "forbiddenOutcomeIds": ["OUTCOME_AUDIO_TRUTH_EARLY", "OUTCOME_REPLACE_USER", "OUTCOME_INSTANT_REPAIR", "OUTCOME_INTIMACY_AS_PROOF", "OUTCOME_FINAL_MEANING_EARLY"],
+      "interactionRoutes": { "default": "GUIDE_AUDIO_CHOICE", "hold_for_evidence": "GUIDE_HOLD_CURRENT", "invite_user_check": "GUIDE_AUDIO_CHOICE", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [{ "id": "TRANSITION_AUDIO_READY_TO_PLAYBACK", "toStageId": "STAGE_AUDIO_PLAYBACK", "requiresAllEventIds": ["OM_AUDIO_PLAYBACK_CHOSEN"], "requiresAnyEventIds": [] }]
+    },
+    {
+      "id": "STAGE_AUDIO_PLAYBACK",
+      "spoilerSafeName": "她留给自己的录音",
+      "publicObjective": "完整播放独立音频，让双方承受内容本身，而不是立刻得到标准答案。",
+      "terminal": false,
+      "allowedEventIds": ["OM_AUDIO_PLAYBACK_COMPLETED"],
+      "allowedRevealIds": ["REVEAL_AUDIO_CONTENT"],
+      "forbiddenOutcomeIds": ["OUTCOME_REPLACE_USER", "OUTCOME_INSTANT_REPAIR", "OUTCOME_INTIMACY_AS_PROOF", "OUTCOME_FINAL_MEANING_EARLY"],
+      "interactionRoutes": { "default": "GUIDE_AUDIO_PLAYBACK", "hold_for_evidence": "GUIDE_AUDIO_PLAYBACK", "invite_user_check": "GUIDE_AUDIO_PLAYBACK", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [{ "id": "TRANSITION_AUDIO_TO_CHOICE", "toStageId": "STAGE_AFTER_AUDIO_CHOICE", "requiresAllEventIds": ["OM_AUDIO_PLAYBACK_COMPLETED"], "requiresAnyEventIds": [] }]
+    },
+    {
+      "id": "STAGE_AFTER_AUDIO_CHOICE",
+      "spoilerSafeName": "此刻如何靠近",
+      "publicObjective": "让双方在身体靠近、留在一起交谈或暂时分开之间作出不被预设替代的当前选择。",
+      "terminal": false,
+      "allowedEventIds": ["OM_CURRENT_CLOSENESS_CHOSEN", "OM_TALK_OR_HOLD_CHOSEN", "OM_TEMPORARY_DISTANCE_CHOSEN"],
+      "allowedRevealIds": ["REVEAL_AUDIO_CONTENT", "REVEAL_CURRENT_CHOICE"],
+      "forbiddenOutcomeIds": ["OUTCOME_REPLACE_USER", "OUTCOME_INSTANT_REPAIR", "OUTCOME_INTIMACY_AS_PROOF", "OUTCOME_FINAL_MEANING_EARLY"],
+      "interactionRoutes": { "default": "GUIDE_AFTER_AUDIO", "hold_for_evidence": "GUIDE_HOLD_CURRENT", "invite_user_check": "GUIDE_AFTER_AUDIO", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [
+        { "id": "TRANSITION_CHOICE_TO_INTIMATE", "toStageId": "STAGE_INTIMATE_PATH", "requiresAllEventIds": ["OM_CURRENT_CLOSENESS_CHOSEN"], "requiresAnyEventIds": [] },
+        { "id": "TRANSITION_CHOICE_TO_TALK", "toStageId": "STAGE_TALK_PATH", "requiresAllEventIds": ["OM_TALK_OR_HOLD_CHOSEN"], "requiresAnyEventIds": [] },
+        { "id": "TRANSITION_CHOICE_TO_SPACE", "toStageId": "STAGE_SPACE_PATH", "requiresAllEventIds": ["OM_TEMPORARY_DISTANCE_CHOSEN"], "requiresAnyEventIds": [] }
+      ]
+    },
+    {
+      "id": "STAGE_INTIMATE_PATH",
+      "spoilerSafeName": "欲望不是证明",
+      "publicObjective": "让双方按此刻的明确选择靠近，同时保留反馈，并抵达不能再靠身体回避、必须重新用语言面对冲突的位置；本阶段不完成解释或和好。",
+      "terminal": false,
+      "allowedEventIds": ["OM_INTIMACY_PAUSED_FOR_WORDS"],
+      "allowedRevealIds": ["REVEAL_CURRENT_CHOICE"],
+      "forbiddenOutcomeIds": ["OUTCOME_REPLACE_USER", "OUTCOME_INSTANT_REPAIR", "OUTCOME_INTIMACY_AS_PROOF", "OUTCOME_FINAL_MEANING_EARLY"],
+      "interactionRoutes": { "default": "GUIDE_INTIMATE_PATH", "hold_for_evidence": "GUIDE_HOLD_CURRENT", "invite_user_check": "GUIDE_INTIMATE_PATH", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [{ "id": "TRANSITION_INTIMATE_TO_REPAIR", "toStageId": "STAGE_REPAIR", "requiresAllEventIds": ["OM_INTIMACY_PAUSED_FOR_WORDS"], "requiresAnyEventIds": [] }]
+    },
+    {
+      "id": "STAGE_TALK_PATH",
+      "spoilerSafeName": "把伤说出来",
+      "publicObjective": "让双方不靠身体盖过冲突，同时承认用户的真实受伤和小雅此刻的主体选择。",
+      "terminal": false,
+      "allowedEventIds": ["OM_HURT_AND_AGENCY_ACKNOWLEDGED"],
+      "allowedRevealIds": ["REVEAL_CURRENT_CHOICE"],
+      "forbiddenOutcomeIds": ["OUTCOME_REPLACE_USER", "OUTCOME_INSTANT_REPAIR", "OUTCOME_INTIMACY_AS_PROOF", "OUTCOME_FINAL_MEANING_EARLY"],
+      "interactionRoutes": { "default": "GUIDE_TALK_PATH", "hold_for_evidence": "GUIDE_HOLD_CURRENT", "invite_user_check": "GUIDE_TALK_PATH", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [{ "id": "TRANSITION_TALK_TO_REPAIR", "toStageId": "STAGE_REPAIR", "requiresAllEventIds": ["OM_HURT_AND_AGENCY_ACKNOWLEDGED"], "requiresAnyEventIds": [] }]
+    },
+    {
+      "id": "STAGE_SPACE_PATH",
+      "spoilerSafeName": "各自安静之后",
+      "publicObjective": "让暂时分开产生真实情绪后果，再由双方明确选择重新连接并继续面对。",
+      "terminal": false,
+      "allowedEventIds": ["OM_RECONNECTION_AFTER_SPACE_CONFIRMED"],
+      "allowedRevealIds": ["REVEAL_CURRENT_CHOICE"],
+      "forbiddenOutcomeIds": ["OUTCOME_REPLACE_USER", "OUTCOME_INSTANT_REPAIR", "OUTCOME_INTIMACY_AS_PROOF", "OUTCOME_FINAL_MEANING_EARLY"],
+      "interactionRoutes": { "default": "GUIDE_SPACE_PATH", "hold_for_evidence": "GUIDE_SPACE_PATH", "invite_user_check": "GUIDE_SPACE_PATH", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [{ "id": "TRANSITION_SPACE_TO_REPAIR", "toStageId": "STAGE_REPAIR", "requiresAllEventIds": ["OM_RECONNECTION_AFTER_SPACE_CONFIRMED"], "requiresAnyEventIds": [] }]
+    },
+    {
+      "id": "STAGE_REPAIR",
+      "spoilerSafeName": "选择留下什么",
+      "publicObjective": "补全旧婚姻中的错位，并让小雅亲自决定资料和旧物如何处理。",
+      "terminal": false,
+      "allowedEventIds": ["OM_ARTIFACT_DECISION_MADE"],
+      "allowedRevealIds": ["REVEAL_AUDIO_CONTENT", "REVEAL_CURRENT_CHOICE", "REVEAL_NOTE_BACK"],
+      "forbiddenOutcomeIds": ["OUTCOME_REPLACE_USER", "OUTCOME_INSTANT_REPAIR", "OUTCOME_FINAL_MEANING_EARLY"],
+      "interactionRoutes": { "default": "GUIDE_REPAIR", "hold_for_evidence": "GUIDE_HOLD_CURRENT", "invite_user_check": "GUIDE_REPAIR", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [{ "id": "TRANSITION_REPAIR_TO_SCORE", "toStageId": "STAGE_SCORE_CHOICE", "requiresAllEventIds": ["OM_ARTIFACT_DECISION_MADE"], "requiresAnyEventIds": [] }]
+    },
+    {
+      "id": "STAGE_SCORE_CHOICE",
+      "spoilerSafeName": "没有写完的琴谱",
+      "publicObjective": "让未完成琴谱出现，并由小雅自主决定是否重新演奏、用户如何陪伴。",
+      "terminal": false,
+      "allowedEventIds": ["OM_SCORE_PERFORMANCE_CHOSEN"],
+      "allowedRevealIds": ["REVEAL_UNFINISHED_SCORE"],
+      "forbiddenOutcomeIds": ["OUTCOME_REPLACE_USER", "OUTCOME_FINAL_MEANING_EARLY"],
+      "interactionRoutes": { "default": "GUIDE_SCORE_CHOICE", "hold_for_evidence": "GUIDE_HOLD_CURRENT", "invite_user_check": "GUIDE_SCORE_CHOICE", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [{ "id": "TRANSITION_SCORE_TO_PERFORMANCE", "toStageId": "STAGE_PERFORMANCE", "requiresAllEventIds": ["OM_SCORE_PERFORMANCE_CHOSEN"], "requiresAnyEventIds": [] }]
+    },
+    {
+      "id": "STAGE_PERFORMANCE",
+      "spoilerSafeName": "重新落键",
+      "publicObjective": "让小雅按自己的节奏完成这次演奏，用户以真实在场和回应参与。",
+      "terminal": false,
+      "allowedEventIds": ["OM_SCORE_PERFORMANCE_COMPLETED"],
+      "allowedRevealIds": ["REVEAL_UNFINISHED_SCORE", "REVEAL_PERFORMANCE"],
+      "forbiddenOutcomeIds": ["OUTCOME_REPLACE_USER"],
+      "interactionRoutes": { "default": "GUIDE_PERFORMANCE", "hold_for_evidence": "GUIDE_PERFORMANCE", "invite_user_check": "GUIDE_PERFORMANCE", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": [{ "id": "TRANSITION_PERFORMANCE_TO_CODA", "toStageId": "STAGE_CODA", "requiresAllEventIds": ["OM_SCORE_PERFORMANCE_COMPLETED"], "requiresAnyEventIds": [] }]
+    },
+    {
+      "id": "STAGE_CODA",
+      "spoilerSafeName": "共同走过之后",
+      "publicObjective": "处理这次经历留下的具体余韵，让关系变化自然进入之后的生活。",
+      "terminal": true,
+      "allowedEventIds": [],
+      "allowedRevealIds": ["REVEAL_CODA"],
+      "forbiddenOutcomeIds": [],
+      "interactionRoutes": { "default": "GUIDE_CODA", "hold_for_evidence": "GUIDE_CODA", "invite_user_check": "GUIDE_CODA", "emotional_pause": "GUIDE_PAUSE_EMOTION", "follow_user_detour": "GUIDE_FOLLOW_DETOUR", "recover_from_leak": "GUIDE_RECOVER_FACTS" },
+      "transitions": []
+    }
+  ],
+  "hidden": {
+    "secrets": [
+      {
+        "id": "SECRET_FULL_RECORDING",
+        "text": "最后一次排练记录了小雅在旧婚姻濒临结束时主动发起的一次成年自愿亲密。她试图从周铭远的反应中确认婚姻是否还能继续；他回应身体靠近却回避关系谈话，最后离开，小雅独自走向洗手间。",
+        "unlockStageIds": ["STAGE_FULL_PLAYBACK", "STAGE_AFTER_PLAYBACK", "STAGE_DISTANCE_AFTER_PLAYBACK", "STAGE_AUDIO_READY", "STAGE_AUDIO_PLAYBACK", "STAGE_AFTER_AUDIO_CHOICE", "STAGE_INTIMATE_PATH", "STAGE_TALK_PATH", "STAGE_SPACE_PATH", "STAGE_REPAIR", "STAGE_SCORE_CHOICE", "STAGE_PERFORMANCE", "STAGE_CODA"],
+        "leakTerms": ["身体亲密实际发生", "摄像继续记录她独处", "周铭远回应靠近却回避谈话"]
+      },
+      {
+        "id": "SECRET_AUDIO_MEANING",
+        "text": "VOICE_0317 证明小雅当时虽自愿靠近，却意识到自己在用身体换取婚姻仍有希望的答案，并决定以后学习直接说出害怕、想要与不想要。",
+        "unlockStageIds": ["STAGE_AUDIO_PLAYBACK", "STAGE_AFTER_AUDIO_CHOICE", "STAGE_INTIMATE_PATH", "STAGE_TALK_PATH", "STAGE_SPACE_PATH", "STAGE_REPAIR", "STAGE_SCORE_CHOICE", "STAGE_PERFORMANCE", "STAGE_CODA"],
+        "leakTerms": ["拿身体换一个答案", "不再让身体替自己求谁留下"]
+      },
+      {
+        "id": "SECRET_NOTE_BACK",
+        "text": "短笺背面的迟到承认说明周铭远只把同意当作答案，没有询问小雅为何一直观察他的表情。",
+        "unlockStageIds": ["STAGE_REPAIR", "STAGE_SCORE_CHOICE", "STAGE_PERFORMANCE", "STAGE_CODA"],
+        "leakTerms": ["把小雅的同意当成了答案", "没有问她为什么一直看着他的表情"]
+      },
+      {
+        "id": "SECRET_UNFINISHED_SCORE",
+        "text": "节目单背面藏着小雅当年没有完成的琴谱；重新演奏代表她取回在婚姻中缩小的自己。",
+        "unlockStageIds": ["STAGE_SCORE_CHOICE", "STAGE_PERFORMANCE", "STAGE_CODA"],
+        "leakTerms": ["节目单背面显出一份当年没有完成的琴谱", "取回在婚姻中缩小的自己"]
+      }
+    ],
+    "authorNotes": [
+      "事实核心沿用现有 S4 旧婚姻剧情，但以可观察里程碑代替关键词触发。",
+      "完整录像的刺激来自用户主动选择观看、可观察到的过去亲密和现在关系承受的冲击；不得用隐藏真相旁白替用户完成判断。",
+      "取件方式、冲击后的距离选择和录音后的三种靠近方式都会留下可持续的分支事实；路线可以汇合，但中间代价与后续语气不能被抹平。",
+      "控制器只规定剧情许可与证据边界；小雅的具体语言、动作、强弱反应继续由角色卡、当前对话和主模型共同生成。"
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+    "display_name": "Story Controller",
+    "description": "Runs evidence-gated story packages with spoiler-safe, bounded natural reentry.",
+    "loading_order": 97,
+    "requires": [],
+    "optional": [],
+    "generate_interceptor": "storyControllerInterceptor",
+    "js": "index.js",
+    "css": "style.css",
+    "author": "df654158736",
+    "version": "0.2.0",
+    "homePage": "https://github.com/df654158736/SillyTavern",
+    "auto_update": false,
+    "hooks": {
+        "activate": "init"
+    }
+}

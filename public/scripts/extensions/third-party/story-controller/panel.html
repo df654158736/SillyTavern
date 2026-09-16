@@ -1,0 +1,47 @@
+<aside id="sc_panel" class="sc-panel" aria-hidden="true">
+    <header class="sc-panel-header">
+        <div>
+            <div class="sc-eyebrow">STORY CONTROLLER</div>
+            <h3 id="sc_story_name">未绑定剧情</h3>
+            <div id="sc_panel_status" class="sc-status">已关闭</div>
+        </div>
+        <button id="sc_close_panel" class="menu_button sc-icon-button" title="关闭">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    </header>
+    <div class="sc-panel-scroll">
+        <section class="sc-hero-card">
+            <div class="sc-section-title">当前阶段</div>
+            <h4 id="sc_stage_name">尚未开始</h4>
+            <div id="sc_stage_objective" class="sc-objective">绑定剧情包后显示无剧透目标。</div>
+            <div id="sc_stage_mode" class="sc-chips"></div>
+        </section>
+        <section class="sc-card">
+            <div class="sc-section-title">已确认 OM</div>
+            <div id="sc_events" class="sc-list"></div>
+        </section>
+        <section class="sc-card">
+            <div class="sc-section-title">最近判断</div>
+            <div id="sc_metrics" class="sc-metrics"></div>
+            <pre id="sc_decision" class="sc-code"></pre>
+            <button id="sc_panel_retry" class="menu_button menu_button_icon">
+                <i class="fa-solid fa-rotate"></i>
+                <span>重试最近判断</span>
+            </button>
+        </section>
+        <details class="sc-debug-card">
+            <summary>作者 / 调试控制</summary>
+            <p class="sc-muted">这里会显示阶段数量和无剧透阶段名，普通游玩时无需展开。</p>
+            <label for="sc_manual_stage">从当前消息起设置阶段</label>
+            <select id="sc_manual_stage" class="text_pole"></select>
+            <div class="flex-container sc-action-row">
+                <button id="sc_set_stage" class="menu_button">设置阶段</button>
+                <button id="sc_reset_progress" class="menu_button redWarningBG">重置到开场阶段</button>
+            </div>
+        </details>
+    </div>
+</aside>
+<button id="sc_panel_toggle" class="sc-panel-toggle menu_button" title="打开剧情控制器">
+    <i class="fa-solid fa-clapperboard"></i>
+    <span id="sc_toggle_text">剧情控制</span>
+</button>
