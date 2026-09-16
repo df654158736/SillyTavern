@@ -68,6 +68,7 @@ import {
 } from '../tokenizers.js';
 import { getVertexAIAuth, getProjectIdFromServiceAccount } from '../google.js';
 import { getCookieSecret } from '../../users.js';
+import { fetchGoogleModels, GoogleModelsHttpError } from './google-models.js';
 
 const API_OPENAI = 'https://api.openai.com/v1';
 const API_CLAUDE = 'https://api.anthropic.com/v1';
@@ -249,6 +250,7 @@ async function sendClaudeRequest(request, response) {
         const convertedPrompt = convertClaudeMessages(request.body.messages, request.body.assistant_prefill, useSystemPrompt, useTools, getPromptNames(request));
         // Unanchored to also match prefixed ids passed through proxies, e.g. 'anthropic/claude-fable-5'
         const isFableModel = /claude-fable/.test(request.body.model);
+        const isFable51Model = /claude-fable-5-1/.test(request.body.model);
         const isClaude5Model = /claude-(opus-5|sonnet-5)/.test(request.body.model);
         const useThinking = /^claude-(3-7|opus-4|sonnet-4|haiku-4-5|opus-4-5|opus-4-6|sonnet-4-6|opus-4-7)/.test(request.body.model) || isFableModel || isClaude5Model;
         const useWebSearch = (/^claude-(3-5|3-7|opus-4|sonnet-4|haiku-4-5|opus-4-5|opus-4-6|sonnet-4-6|opus-4-7)/.test(request.body.model) || isFableModel || isClaude5Model) && Boolean(request.body.enable_web_search);
@@ -297,15 +299,24 @@ async function sendClaudeRequest(request, response) {
             }
         }
 
-        // Structured output is a forced tool
+        // Fable 5.1 rejects forced tools, but supports native JSON outputs.
         if (request.body.json_schema) {
-            const jsonTool = {
-                name: request.body.json_schema.name,
-                description: request.body.json_schema.description || 'Well-formed JSON object',
-                input_schema: request.body.json_schema.value,
-            };
-            requestBody.tools = [...(requestBody.tools || []), jsonTool];
-            requestBody.tool_choice = { type: 'tool', name: request.body.json_schema.name };
+            if (isFable51Model) {
+                requestBody.output_config = {
+                    format: {
+                        type: 'json_schema',
+                        schema: request.body.json_schema.value,
+                    },
+                };
+            } else {
+                const jsonTool = {
+                    name: request.body.json_schema.name,
+                    description: request.body.json_schema.description || 'Well-formed JSON object',
+                    input_schema: request.body.json_schema.value,
+                };
+                requestBody.tools = [...(requestBody.tools || []), jsonTool];
+                requestBody.tool_choice = { type: 'tool', name: request.body.json_schema.name };
+            }
         }
 
         if (useWebSearch) {
@@ -1908,26 +1919,15 @@ router.post('/status', async function (request, statusResponse) {
             }
 
             try {
-                const response = await fetch(modelsUrl);
-
-                if (response.ok) {
-                    /** @type {any} */
-                    const data = await response.json();
-                    // Transform Google AI Studio models to OpenAI format
-                    const models = data.models
-                        ?.filter(model => model.supportedGenerationMethods?.includes('generateContent'))
-                        ?.map(model => ({
-                            ...model,
-                            id: model.name.replace('models/', ''),
-                        })) || [];
-
-                    console.info('Available Google AI Studio models:', models.map(m => m.id));
-                    return statusResponse.send({ data: models });
-                } else {
-                    console.warn('Google AI Studio models endpoint failed:', response.status, response.statusText);
+                const models = await fetchGoogleModels(modelsUrl);
+                console.info('Available Google AI Studio models:', models.map(m => m.id));
+                return statusResponse.send({ data: models });
+            } catch (error) {
+                if (error instanceof GoogleModelsHttpError) {
+                    console.warn('Google AI Studio models endpoint failed:', error.status, error.statusText);
                     return statusResponse.send({ error: true, bypass: true, data: { data: [] } });
                 }
-            } catch (error) {
+
                 console.error('Error fetching Google AI Studio models:', error);
                 return statusResponse.send({ error: true, bypass: true, data: { data: [] } });
             }
