@@ -1,0 +1,36 @@
+<div id="current_scene_image_settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <div class="flex-container alignitemscenter margin0">
+                <b>当前场景图片</b>
+                <span id="ksi_status" class="ksi-status" data-state="idle">就绪</span>
+            </div>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <label for="ksi_prompt_profile">提示词模型连接</label>
+            <select id="ksi_prompt_profile" class="text_pole"></select>
+            <small>使用完整的 Connection Manager 连接配置，不会切换正文聊天连接。</small>
+
+            <label class="checkbox_label" for="ksi_takeover_message_button">
+                <input id="ksi_takeover_message_button" type="checkbox">
+                <span>让消息画笔按钮使用当前场景流程</span>
+            </label>
+            <label class="checkbox_label" for="ksi_show_toolbar_action">
+                <input id="ksi_show_toolbar_action" type="checkbox">
+                <span>在“生成图片”菜单显示“当前场景图片”</span>
+            </label>
+
+            <label for="ksi_prompt_template">图片提示词整理规则</label>
+            <textarea id="ksi_prompt_template" class="text_pole textarea_compact" rows="10"></textarea>
+            <small>默认使用通用自然语言图片提示词，也可以按当前生图模型修改。第一次弹窗选择场景原文，第二次弹窗显示真正将交给原生图片生成器的提示词。</small>
+
+            <div class="flex-container">
+                <button id="ksi_reset_prompt" class="menu_button menu_button_icon">
+                    <i class="fa-solid fa-rotate-left"></i>
+                    <span>恢复默认规则</span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

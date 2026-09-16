@@ -68,7 +68,6 @@ import {
 } from '../tokenizers.js';
 import { getVertexAIAuth, getProjectIdFromServiceAccount } from '../google.js';
 import { getCookieSecret } from '../../users.js';
-import { createProviderFetch } from '../../provider-request-proxy.js';
 
 const API_OPENAI = 'https://api.openai.com/v1';
 const API_CLAUDE = 'https://api.anthropic.com/v1';
@@ -99,7 +98,6 @@ const API_MINIMAX = 'https://api.minimax.io/v1';
 const API_MINIMAX_CN = 'https://api.minimaxi.com/v1';
 const API_OPENROUTER = 'https://openrouter.ai/api/v1';
 const API_WORKERS_AI = 'https://api.cloudflare.com/client/v4/accounts';
-const googleFetch = createProviderFetch(fetch, 'google');
 
 /**
  * Module-scoped Claude caching configuration values.
@@ -721,7 +719,7 @@ async function sendMakerSuiteRequest(request, response) {
             url = `${apiUrl.toString().replace(/\/$/, '')}/${apiVersion}/models/${model}:${responseType}?key=${apiKey}${stream ? '&alt=sse' : ''}`;
         }
 
-        const generateResponse = await googleFetch(url, {
+        const generateResponse = await fetch(url, {
             body: JSON.stringify(body),
             method: 'POST',
             headers: headers,
@@ -1910,7 +1908,7 @@ router.post('/status', async function (request, statusResponse) {
             }
 
             try {
-                const response = await googleFetch(modelsUrl);
+                const response = await fetch(modelsUrl);
 
                 if (response.ok) {
                     /** @type {any} */
@@ -2289,12 +2287,6 @@ router.post('/generate', async function (request, response) {
                 top_logprobs: undefined,
             };
 
-            // Allow isolated internal requests to control thinking without changing
-            // the user's global provider configuration.
-            if (['enabled', 'disabled'].includes(request.body.thinking?.type)) {
-                bodyParams.thinking = { type: request.body.thinking.type };
-            }
-
             // Adjust logprobs params for Chat Completions API, which expects { top_logprobs: number; logprobs: boolean; }
             if (!isTextCompletion && bodyParams.logprobs > 0) {
                 bodyParams.top_logprobs = bodyParams.logprobs;
@@ -2408,12 +2400,6 @@ router.post('/generate', async function (request, response) {
                 top_logprobs: undefined,
             };
 
-            // Allow isolated internal requests to control thinking without changing
-            // the user's global custom-provider body configuration.
-            if (['enabled', 'disabled'].includes(request.body.thinking?.type)) {
-                bodyParams.thinking = { type: request.body.thinking.type };
-            }
-
             // Adjust logprobs params for Chat Completions API, which expects { top_logprobs: number; logprobs: boolean; }
             if (!isTextCompletion && bodyParams.logprobs > 0) {
                 bodyParams.top_logprobs = bodyParams.logprobs;
@@ -2424,20 +2410,14 @@ router.post('/generate', async function (request, response) {
             mergeObjectWithYaml(headers, request.body.custom_include_headers);
             embedOpenRouterMedia(request.body.messages, { audio: true, video: false });
             if (request.body.json_schema) {
-                // DeepSeek's OpenAI-compatible API supports JSON Object mode, but
-                // not every deployment accepts OpenAI's json_schema response type.
-                if (/^https:\/\/api\.deepseek\.com(?:\/|$)/i.test(String(apiUrl))) {
-                    setJsonObjectFormat(bodyParams, request.body.messages, request.body.json_schema);
-                } else {
-                    bodyParams['response_format'] = {
-                        type: 'json_schema',
-                        json_schema: {
-                            name: request.body.json_schema.name,
-                            strict: request.body.json_schema.strict ?? true,
-                            schema: request.body.json_schema.value,
-                        },
-                    };
-                }
+                bodyParams['response_format'] = {
+                    type: 'json_schema',
+                    json_schema: {
+                        name: request.body.json_schema.name,
+                        strict: request.body.json_schema.strict ?? true,
+                        schema: request.body.json_schema.value,
+                    },
+                };
             }
         } else if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.PERPLEXITY) {
             apiUrl = API_PERPLEXITY;

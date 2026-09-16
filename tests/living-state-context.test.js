@@ -1,7 +1,7 @@
 import { describe, expect, test } from '@jest/globals';
-import { collectMessages, createEmptyState, formatStateForPrompt, mergeDelta, normalizeState, sanitizeEvidenceText, saveStateSnapshot, findLatestSnapshot } from '../public/scripts/extensions/living-state-harness/state.js';
-import { buildReferenceContext, describeContext, getContextStatus, prepareStateForUpdater, projectContext, REFERENCE_WINDOW } from '../public/scripts/extensions/living-state-harness/context.js';
-import { createContinuationChat } from '../public/scripts/extensions/living-state-harness/archive.js';
+import { collectMessages, createEmptyState, formatStateForPrompt, mergeDelta, normalizeState, sanitizeEvidenceText, saveStateSnapshot, findLatestSnapshot } from '../public/scripts/extensions/third-party/living-state-harness/state.js';
+import { buildReferenceContext, describeContext, getContextStatus, prepareStateForUpdater, projectContext, REFERENCE_WINDOW } from '../public/scripts/extensions/third-party/living-state-harness/context.js';
+import { createContinuationChat } from '../public/scripts/extensions/third-party/living-state-harness/archive.js';
 
 const subject = { role: 'character', name: 'Alice', counterpartName: 'Sam' };
 const message = (id, content) => ({ id, role: 'assistant', content });
@@ -32,7 +32,7 @@ describe('Evidence, scope and non-directive state projection', () => {
         expect(formatStateForPrompt(createEmptyState(subject))).toBe('');
     });
 
-    test('retains legacy data but suppresses unverified management motives and scripts', () => {
+    test('retains legacy data for inspection but injects none of it without provenance', () => {
         const old = createEmptyState(subject);
         delete old.context;
         old.scene.location = '公园';
@@ -43,9 +43,8 @@ describe('Evidence, scope and non-directive state projection', () => {
         old.agency.boundary = '不公开照片';
         const before = structuredClone(old);
         const prompt = formatStateForPrompt(old);
-        expect(prompt).toContain('公园');
-        expect(prompt).toContain('不公开照片');
-        for (const text of ['怕对方选错饮料', '想管住对方', '检查头发是否擦干', '对方不配合就数落']) expect(prompt).not.toContain(text);
+        expect(prompt).toBe('');
+        for (const text of ['公园', '不公开照片', '怕对方选错饮料', '想管住对方', '检查头发是否擦干', '对方不配合就数落']) expect(prompt).not.toContain(text);
         expect(old).toEqual(before);
         expect(normalizeState(old).agency.responseIfBlocked).toBe('对方不配合就数落');
     });
@@ -226,6 +225,29 @@ describe('Evidence, scope and non-directive state projection', () => {
         expect(prompt).not.toContain('Boundary pressure');
         expect(prompt).not.toContain('Initiative readiness');
         expect(state.signals.boundaryPressure.value).toBe(8);
+    });
+
+    test('observed prose cannot establish hidden intent fields', () => {
+        const source = message(1, '她看了眼门口，慢慢站起来。');
+        const changes = fieldDelta('agency.currentPlan', '准备离开', scope(source, { basis: 'observed' }));
+        expect(() => apply(createEmptyState(subject), changes, [source])).toThrow(/explicit dialogue/);
+    });
+
+    test('a verified immediate plan expires after the next exchange instead of becoming a dialogue template', () => {
+        const source = message(10, '我先去厨房倒杯水。');
+        const state = apply(createEmptyState(subject), fieldDelta('agency.currentPlan', '去厨房倒水', scope(source, { scope: 'scene' })), [source]);
+        expect(formatStateForPrompt(state, subject, {}, [{ id: 11, role: 'user', content: '好。' }])).toContain('去厨房倒水');
+        expect(formatStateForPrompt(state, subject, {}, [{ id: 13, role: 'user', content: '你在想什么？' }])).not.toContain('去厨房倒水');
+        expect(state.agency.currentPlan).toBe('去厨房倒水');
+        expect(describeContext(state.context.fields['agency.currentPlan'], state, [{ id: 13, role: 'user', content: '你在想什么？' }], 'agency.currentPlan')).toContain('已过期');
+    });
+
+    test('unconfirmed relationship context remains inspectable but is not injected', () => {
+        const source = message(1, '我爱你。');
+        const state = apply(createEmptyState(subject), fieldDelta('relationship.emotionalCloseness', '明确爱意', scope(source)), [source]);
+        expect(state.relationship.emotionalCloseness).toBe('明确爱意');
+        expect(formatStateForPrompt(state)).not.toContain('明确爱意');
+        expect(describeContext(state.context.fields['relationship.emotionalCloseness'], state, [], 'relationship.emotionalCloseness')).toContain('缺少用户确认');
     });
 });
 

@@ -268,7 +268,7 @@ function normalizeReferenceIds(value) {
 }
 
 export function formatStateForPrompt(input, subject = null, guidance = {}, messages = []) {
-    const { state, boundaries, legacyBoundary } = projectContext(normalizeState(input, subject), messages);
+    const { state, boundaries } = projectContext(normalizeState(input, subject), messages);
     const characterName = state.subject.name || 'the active character';
     const counterpartName = state.subject.counterpartName || 'the user';
     const fixedStart = [
@@ -281,7 +281,7 @@ export function formatStateForPrompt(input, subject = null, guidance = {}, messa
         `Hard boundary: never decide "${counterpartName}"'s private thoughts, new commitments, consequential dialogue, plans, feelings, or key actions. No score or creative setting may override this.`,
         'State describes the last confirmed situation; newer accepted dialogue may update it. Follow the character card for personality and voice. Plans are possibilities, not dialogue templates; ordinary wishes do not imply supervision or a refusal.',
         'Apply each explicit limit only to its stated subject and circumstances. Compliance or a topic change does not revoke it. Do not invent pressure, punishment, or a scripted response.',
-        'Signals are descriptive, not goals. Let feelings develop through events. Do not force warmth, composure, or instant repair.',
+        'Only the verified items shown here may be treated as continuity. If a detail is absent, do not reconstruct it from a score, guess, or implied backstory. Let feelings develop through events; do not force warmth, composure, or instant repair.',
         '[/Current Living State]',
     ];
     const candidates = [
@@ -295,17 +295,15 @@ export function formatStateForPrompt(input, subject = null, guidance = {}, messa
         promptTextCandidate(80, 0, `${characterName}.Plan`, [state.agency.currentPlan], 160),
         promptTextCandidate(90, 2, `${characterName}.Possible initiative`, [state.agency.initiativeSeed], 130),
         promptTextCandidate(100, 2, `${characterName}.Impulse / inhibition`, [state.character.privateImpulse, state.character.inhibition], 180),
-        promptTextCandidate(110, 1, 'Previous limit (scope unverified; check original dialogue)', [legacyBoundary], 240),
         promptTextCandidate(120, 0, `Relationship (${characterName} toward ${counterpartName})`, [state.relationship.trust, state.relationship.emotionalCloseness, state.relationship.authorityDynamic, state.relationship.currentTension], 260),
-        promptSignalCandidate(130, 1, state.signals),
-        promptListCandidate(140, 4, `${characterName}.Evolved preferences`, state.relationship.evolvedPreferences, 1),
-        promptListCandidate(150, 4, `${characterName}.Recent offscreen events`, state.offscreenLife.recentEvents, 1),
-        promptListCandidate(160, 1, `${characterName}.Upcoming obligations`, state.offscreenLife.upcomingObligations, 2),
-        promptListCandidate(170, 4, `${characterName}.People on mind`, state.offscreenLife.peopleOnMind, 1),
-        promptListCandidate(180, 1, 'Important continuity facts', state.continuity.importantFacts, 3),
-        promptListCandidate(190, 1, 'Open promises', state.continuity.openPromises, 2),
-        promptListCandidate(200, 1, 'Open threads', state.continuity.openThreads, 2),
-        promptListCandidate(210, 3, 'Recent turning points', state.recentTurningPoints, 1),
+        promptListCandidate(140, 4, `${characterName}.Evolved preferences`, verifiedItems(state.relationship.evolvedPreferences), 1),
+        promptListCandidate(150, 4, `${characterName}.Recent offscreen events`, verifiedItems(state.offscreenLife.recentEvents), 1),
+        promptListCandidate(160, 1, `${characterName}.Upcoming obligations`, verifiedItems(state.offscreenLife.upcomingObligations), 2),
+        promptListCandidate(170, 4, `${characterName}.People on mind`, verifiedItems(state.offscreenLife.peopleOnMind), 1),
+        promptListCandidate(180, 1, 'Important continuity facts', verifiedItems(state.continuity.importantFacts), 3),
+        promptListCandidate(190, 1, 'Open promises', verifiedItems(state.continuity.openPromises), 2),
+        promptListCandidate(200, 1, 'Open threads', verifiedItems(state.continuity.openThreads), 2),
+        promptListCandidate(210, 3, 'Recent turning points', verifiedItems(state.recentTurningPoints), 1),
     ];
     const limits = boundaries.map(b => `Explicit limit: ${b.text} | Applies: ${b.appliesWhen} | Ends only when: ${b.endsWhen}`);
     return composeBudgetedPrompt([...fixedStart, ...limits], candidates, fixedEnd);
@@ -465,7 +463,16 @@ function updateList(target, additions, removals, allowedEvidence, prefix, limit)
         if (!text || evidenceMessageIds.length === 0) continue;
         const reason = cleanString(candidate?.reason);
         const id = `${prefix}-${hash(`${text}|${evidenceMessageIds.join(',')}`)}`;
-        const item = { id, text, evidenceMessageIds };
+        const item = {
+            id,
+            text,
+            evidenceMessageIds,
+            ...(candidate?.basis === 'explicit' || candidate?.basis === 'observed' ? { basis: candidate.basis } : {}),
+            ...(candidate?.confirmedByUser === true ? { confirmedByUser: true } : {}),
+            ...(Array.isArray(candidate?.evidence) ? { evidence: candidate.evidence
+                .filter(entry => Number.isInteger(Number(entry?.messageId)) && typeof entry?.quote === 'string' && entry.quote.trim())
+                .slice(0, 6).map(entry => ({ messageId: Number(entry.messageId), quote: entry.quote.trim().slice(0, 400) })) } : {}),
+        };
         if (reason) item.reason = reason;
         const existingIndex = target.findIndex(entry => entry.id === id || entry.text === text);
         if (existingIndex >= 0) target.splice(existingIndex, 1);
@@ -483,6 +490,11 @@ function normalizeItems(items, limit) {
                 text: cleanString(item?.text ?? item?.change),
                 ...(cleanString(item?.reason) ? { reason: cleanString(item.reason) } : {}),
                 evidenceMessageIds: numberArray(item?.evidenceMessageIds),
+                ...(item?.basis === 'explicit' || item?.basis === 'observed' ? { basis: item.basis } : {}),
+                ...(item?.confirmedByUser === true ? { confirmedByUser: true } : {}),
+                ...(Array.isArray(item?.evidence) ? { evidence: item.evidence
+                    .filter(entry => Number.isInteger(Number(entry?.messageId)) && typeof entry?.quote === 'string' && entry.quote.trim())
+                    .slice(0, 6).map(entry => ({ messageId: Number(entry.messageId), quote: entry.quote.trim().slice(0, 400) })) } : {}),
             })
         .filter(item => item.text)
         .slice(-limit);
@@ -509,24 +521,15 @@ function cleanString(value) {
     return typeof value === 'string' ? value.trim().slice(0, 1000) : '';
 }
 
-function formatSignalLine(signals) {
-    const values = Object.entries(SIGNAL_DEFINITIONS)
-        // Readiness/pressure stay visible for inspection, not as instructions to act.
-        .filter(([key]) => !['initiativeReadiness', 'boundaryPressure'].includes(key))
-        .map(([key, definition]) => {
-            const signal = normalizeSignal(signals?.[key]);
-            if (signal.value === null) return '';
-            return `${definition.promptLabel} ${signalBand(signal.value)}`;
-        })
-        .filter(Boolean);
-    return values.length ? `Behavior signals: ${values.join('；')}` : '';
+function verifiedItems(items) {
+    return (Array.isArray(items) ? items : []).filter(item => item?.confirmedByUser === true);
 }
 
 function formatNarrativeGuidance(input, characterName, counterpartName) {
     const guidance = normalizeGuidance(input);
     const stateInfluence = {
         subtle: 'Use Living State quietly and only when directly relevant to the immediate exchange.',
-        balanced: 'Let the most relevant Living State signals shape reactions without displaying or mechanically acting out the state sheet.',
+        balanced: 'Let the most relevant verified Living State fields shape reactions without displaying or mechanically acting out the state sheet.',
         strong: 'Let relevant Living State tensions, goals, and boundaries meaningfully shape the character’s choices, without forcing unrelated items into the scene.',
     }[guidance.stateInfluence];
     const initiative = {
@@ -594,17 +597,6 @@ function promptListCandidate(order, priority, label, items, limit) {
     };
 }
 
-function promptSignalCandidate(order, priority, signals) {
-    return {
-        order,
-        priority,
-        render() {
-            const line = formatSignalLine(signals);
-            return line ? { line, values: [] } : null;
-        },
-    };
-}
-
 function composeBudgetedPrompt(fixedStart, candidates, fixedEnd) {
     const start = fixedStart.filter(Boolean);
     const end = fixedEnd.filter(Boolean);
@@ -630,14 +622,6 @@ function compactPromptText(value, maximumCharacters) {
     const minimumBoundary = Math.floor(prefix.length * 0.6);
     const boundary = Math.max(prefix.lastIndexOf('。'), prefix.lastIndexOf('；'), prefix.lastIndexOf('！'), prefix.lastIndexOf('？'));
     return `${prefix.slice(0, boundary >= minimumBoundary ? boundary + 1 : prefix.length).trim()}…`;
-}
-
-function signalBand(value) {
-    if (value <= 2) return 'very low';
-    if (value <= 4) return 'low';
-    if (value <= 6) return 'moderate';
-    if (value <= 8) return 'high';
-    return 'very high';
 }
 
 function areNearDuplicate(left, right) {

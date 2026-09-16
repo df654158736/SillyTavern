@@ -1,0 +1,26 @@
+#current_scene_image_settings .ksi-status {
+    margin-left: 0.5rem;
+    color: var(--SmartThemeQuoteColor);
+    font-size: 0.85em;
+}
+
+#current_scene_image_settings .ksi-status[data-state="busy"] {
+    color: var(--warning-color, #e8b04b);
+}
+
+#current_scene_image_settings .ksi-status[data-state="error"] {
+    color: var(--error-color, #d9534f);
+}
+
+#current_scene_image_settings textarea {
+    box-sizing: border-box;
+    width: 100%;
+    resize: vertical;
+}
+
+#ksi_scene_action::before {
+    content: "\f03e";
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    margin-right: 0.45rem;
+}

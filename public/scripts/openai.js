@@ -3108,24 +3108,15 @@ export async function createGenerationParameters(settings, model, type, messages
  * @returns {Promise<unknown>}
  * @throws {Error}
  */
-async function sendOpenAIRequest(type, messages, signal, { jsonSchema = null, model: modelOverride = null, thinking = null, maxTokens = null, skipChatCompletionSettings = false } = {}) {
+async function sendOpenAIRequest(type, messages, signal, { jsonSchema = null } = {}) {
     // Provide default abort signal
     if (!signal) {
         signal = new AbortController().signal;
     }
 
-    const model = modelOverride || getChatCompletionModel(oai_settings);
+    const model = getChatCompletionModel(oai_settings);
     const { generate_data, stream, canMultiSwipe } = await createGenerationParameters(oai_settings, model, type, messages, { jsonSchema });
-    if (typeof maxTokens === 'number' && maxTokens > 0) {
-        generate_data.max_tokens = maxTokens;
-    }
-    if (thinking === 'enabled' || thinking === 'disabled') {
-        generate_data.thinking = { type: thinking };
-        generate_data.include_reasoning = thinking === 'enabled';
-    }
-    if (!skipChatCompletionSettings) {
-        await eventSource.emit(event_types.CHAT_COMPLETION_SETTINGS_READY, generate_data);
-    }
+    await eventSource.emit(event_types.CHAT_COMPLETION_SETTINGS_READY, generate_data);
 
     const generate_url = '/api/backends/chat-completions/generate';
     const response = await fetch(generate_url, {

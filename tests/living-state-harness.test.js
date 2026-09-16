@@ -15,7 +15,7 @@ import {
     recoverStoryContentFromReasoning,
     saveStateSnapshot,
     sanitizeEvidenceText,
-} from '../public/scripts/extensions/living-state-harness/state.js';
+} from '../public/scripts/extensions/third-party/living-state-harness/state.js';
 import {
     createContinuationChat,
     formatArchiveForPrompt,
@@ -23,7 +23,7 @@ import {
     normalizeArchive,
     parseRepairableJsonObject,
     splitHistoryForArchive,
-} from '../public/scripts/extensions/living-state-harness/archive.js';
+} from '../public/scripts/extensions/third-party/living-state-harness/archive.js';
 
 describe('Living State Harness state ledger', () => {
     const subject = { role: 'character', name: '小雅', counterpartName: 'D' };
@@ -63,7 +63,7 @@ describe('Living State Harness state ledger', () => {
             },
             offscreenLifeChanges: {
                 recentEventsAdd: [],
-                upcomingObligationsAdd: [{ text: '明早需要上课', reason: '既定工作', evidenceMessageIds: [1] }],
+                upcomingObligationsAdd: [{ text: '明早需要上课', reason: '既定工作', basis: 'explicit', confirmedByUser: true, evidenceMessageIds: [1] }],
                 peopleOnMindAdd: [],
             },
             continuityChanges: {
@@ -83,16 +83,16 @@ describe('Living State Harness state ledger', () => {
         expect(prompt).toContain('明早需要上课');
         expect(prompt).toContain('Subject: character "小雅"');
         expect(prompt).not.toContain('小雅.Plan'); // Legacy inferred plans await evidence.
-        expect(prompt).toContain('Previous limit (scope unverified; check original dialogue)');
+        expect(prompt).not.toContain('Previous limit');
         expect(result.state.agency.currentPlan).toBe(delta.agencyChanges.currentPlan);
-        expect(prompt).toContain('Relationship (小雅 toward D)');
-        expect(prompt).toContain('Trust high');
-        expect(prompt).toContain('Tension high');
+        expect(prompt).not.toContain('Relationship (小雅 toward D)');
+        expect(prompt).not.toContain('Trust high');
+        expect(prompt).not.toContain('Tension high');
         expect(prompt).not.toContain('/10');
         expect(prompt).not.toContain('仍愿意交流，但隐瞒造成损伤');
         expect(prompt).toContain('No score or creative setting may override this');
         expect(prompt).toContain('not dialogue templates');
-        expect(prompt).toContain('Do not force warmth, composure, or instant repair');
+        expect(prompt).toContain('do not force warmth, composure, or instant repair');
         expect(prompt).not.toContain('Response Contract');
         expect(prompt).not.toContain('剧情推进单元');
         expect(normalizeState(JSON.parse(JSON.stringify(result.state)))).toEqual(result.state);
@@ -155,6 +155,7 @@ describe('Living State Harness state ledger', () => {
         delete legacy.signals;
         legacy.scene.location = '公园';
         const normalized = normalizeState(legacy, subject);
+        normalized.continuity.importantFacts = [{ id: 'verified', text: '双方确认今天在公园见面', evidenceMessageIds: [1], basis: 'explicit', confirmedByUser: true }];
         const prompt = formatStateForPrompt(normalized, subject, {
             stateInfluence: 'strong',
             initiative: 'assertive',
@@ -206,8 +207,8 @@ describe('Living State Harness state ledger', () => {
 
     test('deduplicates near-identical list items in the injected prompt', () => {
         const state = createEmptyState(subject);
-        state.offscreenLife.recentEvents = [{ id: 'a', text: '小雅已经检查完D的劝学背诵', evidenceMessageIds: [1] }];
-        state.continuity.importantFacts = [{ id: 'b', text: '小雅已经检查完D的劝学背诵。', evidenceMessageIds: [1] }];
+        state.offscreenLife.recentEvents = [{ id: 'a', text: '小雅已经检查完D的劝学背诵', evidenceMessageIds: [1], confirmedByUser: true }];
+        state.continuity.importantFacts = [{ id: 'b', text: '小雅已经检查完D的劝学背诵。', evidenceMessageIds: [1], confirmedByUser: true }];
         const prompt = formatStateForPrompt(state);
 
         expect(prompt.match(/小雅已经检查完D的劝学背诵/g)).toHaveLength(1);
@@ -226,6 +227,7 @@ describe('Living State Harness state ledger', () => {
             id: `fact-${index}`,
             text: `${longText}${index}`,
             evidenceMessageIds: [1],
+            confirmedByUser: true,
         }));
 
         const prompt = formatStateForPrompt(state);
@@ -233,7 +235,7 @@ describe('Living State Harness state ledger', () => {
         expect(prompt.length).toBeLessThanOrEqual(PROMPT_BUDGET_CHARACTERS);
         expect(prompt).toContain('Hard boundary: never decide "D"');
         expect(prompt).toContain('[/Current Living State]');
-        expect(prompt).toContain('Trust very high');
+        expect(prompt).not.toContain('Trust very high');
         expect(prompt).not.toContain('9/10');
         expect(state.scene.location).toBe(longText);
     });

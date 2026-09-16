@@ -3,8 +3,9 @@
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import YAML from 'yaml';
-import { createEmptyDelta, createEmptyState, mergeDelta, normalizeDeltaReferences, formatStateForPrompt } from '../public/scripts/extensions/living-state-harness/state.js';
-import { buildContextUpdaterInstructions, buildReferenceContext, formatContextRequest, prepareStateForUpdater, validateContextDelta } from '../public/scripts/extensions/living-state-harness/context.js';
+import { createEmptyDelta, createEmptyState, formatStateForPrompt } from '../public/scripts/extensions/third-party/living-state-harness/state.js';
+import { buildContextUpdaterInstructions, buildReferenceContext, formatContextRequest, prepareStateForUpdater } from '../public/scripts/extensions/third-party/living-state-harness/context.js';
+import { runReviewedUpdater } from '../public/scripts/extensions/third-party/living-state-harness/updater.js';
 
 if (!process.argv.includes('--live')) {
     console.log('Run from the repository root with: node tests/living-state-context.live.mjs --live');
@@ -116,14 +117,11 @@ for (const item of cases) {
     }
     const messages = item.dialogue.map((content, offset) => ({ id: history.length + offset, role: offset ? 'assistant' : 'user', content }));
     const prompt = JSON.stringify({ targetSubject: subject, characterCore: { name: subject.name, description: '成年、性格自然，有自己的偏好。与陈明平等相处。' }, previousState: prepareStateForUpdater(state), ...buildReferenceContext(history), newMessages: messages, authorLocks: [] });
-    let result;
-    let usedAttempt;
-    let correction = '';
     const started = Date.now();
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    const reviewed = await runReviewedUpdater(async correction => {
         const response = await fetch('http://127.0.0.1:8000/api/backends/chat-completions/generate', {
             method: 'POST', headers, signal: AbortSignal.timeout(180000),
-            body: JSON.stringify({ chat_completion_source: 'custom', model: profile.model, custom_url: profile['api-url'], secret_id: profile['secret-id'], stream: false, max_tokens: 8192, thinking: { type: 'disabled' }, messages: [
+            body: JSON.stringify({ chat_completion_source: 'custom', model: profile.model, custom_url: profile['api-url'], secret_id: profile['secret-id'], stream: false, max_tokens: 8192, custom_include_body: JSON.stringify({ thinking: { type: 'disabled' }, response_format: { type: 'json_object' } }), messages: [
                 { role: 'system', content: buildContextUpdaterInstructions() + '\n立即输出 JSON，不要解释或展示思考。' },
                 { role: 'user', content: formatContextRequest(prompt, createEmptyDelta(subject), correction) },
             ] }),
@@ -131,26 +129,20 @@ for (const item of cases) {
         if (!response.ok) throw new Error('Updater request HTTP ' + response.status);
         const body = await response.json();
         usage += Number(body.usage?.total_tokens ?? 0);
-        const content = String(body.choices?.[0]?.message?.content ?? '');
-        try {
-            const delta = JSON.parse(content.slice(content.indexOf('{'), content.lastIndexOf('}') + 1));
-            normalizeDeltaReferences(delta);
-            validateContextDelta(delta, messages);
-            result = mergeDelta(state, delta, messages.map(m => m.id), messages.at(-1).id, subject, messages).state;
-            usedAttempt = attempt;
-            break;
-        } catch (error) {
-            correction = error.message;
-            if (attempt === 2) throw new Error(item.name + ': ' + correction);
-            console.log(JSON.stringify({ case: item.name, retry: true, validation: correction }));
-        }
-    }
+        return String(body.choices?.[0]?.message?.content ?? '');
+    }, state, messages, subject, async (error, attempt) => {
+        console.log(JSON.stringify({ case: item.name, retry: true, attempt, validation: error.message }));
+    });
+    const result = reviewed.state;
     // Semantic assertions are deliberately outside the format retry loop: never
     // tell the model the expected interpretation and count that correction as a pass.
-    item.check(result);
+    try { item.check(result); } catch (error) {
+        console.log(JSON.stringify({ case: item.name, semanticFailure: error.message, status: reviewed.delta._validation.status, skipped: reviewed.delta._validation.skipped, limitKinds: result.context.boundaries.map(b => b.kind) }));
+        throw error;
+    }
     assert.equal(result.agency.responseIfBlocked, '');
     assert.ok(Object.values(result.context.fields).every(record => record.basis !== 'inferred'), 'A speculative field entered formal state.');
-    console.log(JSON.stringify({ case: item.name, passed: true, attempt: usedAttempt, elapsedSeconds: Math.round((Date.now() - started) / 1000), boundaries: result.context.boundaries.length, evidenceFields: Object.keys(result.context.fields).length }));
+    console.log(JSON.stringify({ case: item.name, passed: true, attempts: reviewed.delta._validation.attempts, elapsedSeconds: Math.round((Date.now() - started) / 1000), status: reviewed.delta._validation.status, skipped: reviewed.delta._validation.skipped, boundaries: result.context.boundaries.length, evidenceFields: Object.keys(result.context.fields).length }));
     state = result;
     history.push(...messages);
 }

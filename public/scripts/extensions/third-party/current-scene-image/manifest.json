@@ -1,0 +1,18 @@
+{
+    "display_name": "Current Scene Image",
+    "description": "Turns selected chat text into an editable image prompt and passes it to SillyTavern's native image generator.",
+    "loading_order": 96,
+    "requires": [],
+    "optional": [
+        "sd"
+    ],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "df654158736",
+    "version": "1.0.0",
+    "homePage": "https://github.com/df654158736/SillyTavern",
+    "auto_update": false,
+    "hooks": {
+        "activate": "init"
+    }
+}
